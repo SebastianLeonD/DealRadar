@@ -29,6 +29,9 @@ Prizepicks/
 │   ├── matcher.py                # Finds edges, fuzzy name match, logs to DB
 │   ├── clv_report.py             # CLV report from logged edges
 │   └── name_matcher.py           # Fuzzy player name matching
+├── web_ui/
+│   ├── app.py                    # Streamlit trading desk dashboard
+│   └── components.py             # UI helpers and DB queries
 ├── storage/
 │   └── db_manager.py             # SQLite ingestion, props + edges tables
 ├── data/
@@ -84,13 +87,9 @@ python3 scrapers/draftkings_api.py
 
 ### 2. Paste PrizePicks raw JSON
 
-Save your PrizePicks board capture to:
+Save your PrizePicks board capture to `data/raw/prizepicks_raw.json` in your editor.
 
-```
-data/raw/prizepicks_raw.json
-```
-
-There is **no live PP scraper** — manual paste is intentional.
+There is **no live PP scraper** — manual file edit is intentional.
 
 ### 3. Parse PrizePicks points board
 
@@ -133,6 +132,27 @@ python3 engine/clv_report.py
 
 ---
 
+## Streamlit Dashboard
+
+Launch the trading desk UI:
+
+```bash
+pip install -r requirements.txt
+streamlit run web_ui/app.py
+```
+
+### Tabs
+
+| Tab | Purpose |
+|---|---|
+| **Execution** | Pipeline buttons, DK/PP freshness indicators |
+| **Active Opportunities** | Neon card-style edge table, filters, CSV download |
+| **CLV Performance** | CLV cards, positive CLV rate, 7-day average CLV chart |
+
+Edit `data/raw/prizepicks_raw.json` in your IDE before parsing from the Execution tab.
+
+---
+
 ## Command Reference
 
 | Command | What it does | API cost |
@@ -142,6 +162,7 @@ python3 engine/clv_report.py
 | `python3 storage/db_manager.py ingest` | Manual JSON → SQLite sync | None |
 | `python3 engine/matcher.py` | Find edges, fuzzy match, log to DB | None |
 | `python3 engine/clv_report.py` | CLV report from logged edges | None |
+| `streamlit run web_ui/app.py` | Launch trading desk dashboard | None |
 | `python3 local_test.py` | Inspect DK true probabilities | None |
 
 ---
