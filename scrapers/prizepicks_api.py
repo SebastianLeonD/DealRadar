@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 RAW_FILE = Path('data/raw/prizepicks_raw.json')
-OUTPUT_FILE = Path('data/processed/prizepicks_live.json')
+OUTPUT_FILE = Path('data/processed/live.json')
 
 # Only ingest single-stat "Points" props. Excludes Fantasy Score, PRA,
 # Pts+Rebs, and "Points (Combo)" multi-player slips.

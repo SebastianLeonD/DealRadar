@@ -1,6 +1,6 @@
 import json
 
-PRIZEPICKS_FILE = 'data/processed/prizepicks_mock.json'
+PRIZEPICKS_FILE = 'data/processed/live.json'
 SHARP_FILE = 'data/processed/draftkings_data.json'
 TARGET_STAT = 'player_points'
 EV_THRESHOLD = 54.25  # The PrizePicks break-even point for a 5/6-slip
