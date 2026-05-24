@@ -1,0 +1,26 @@
+[
+    {
+        "name": "Karl-Anthony Towns",
+        "team": "New York Knicks",
+        "stat_type": "player_points",
+        "line": 15.5
+    },
+    {
+        "name": "Jalen Brunson",
+        "team": "New York Knicks",
+        "stat_type": "player_points",
+        "line": 25.5
+    },
+    {
+        "name": "Shai Gilgeous-Alexander",
+        "team": "Oklahoma City Thunder",
+        "stat_type": "player_points",
+        "line": 28.5
+    },
+    {
+        "name": "Victor Wembanyama",
+        "team": "San Antonio Spurs",
+        "stat_type": "player_points",
+        "line": 25.5
+    }
+]
