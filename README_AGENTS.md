@@ -25,7 +25,10 @@ Prizepicks/
 │   └── prizepicks_api.py         # Parses raw PrizePicks JSON into flat format
 ├── engine/
 │   └── matcher.py                # Compares PP vs DK and prints edge alerts
+├── storage/
+│   └── db_manager.py             # SQLite ingestion and queries
 ├── data/
+│   ├── arb_engine.db             # Local SQLite database (gitignored)
 │   ├── raw/
 │   │   └── prizepicks_raw.json   # Unprocessed PrizePicks API dump (gitignored)
 │   └── processed/
@@ -117,13 +120,22 @@ python3 scrapers/prizepicks_api.py
 - Extracts **single-stat Points only** (excludes Fantasy Score, PRA, combos, multi-player slips)
 - Saves to `data/processed/live.json` as `player_points`
 
-**Step 6 — Run the matcher**
+**Step 6 — Ingest staging JSON into SQLite**
+
+```bash
+python3 storage/db_manager.py ingest
+```
+
+- Reads `data/processed/draftkings_data.json` and `data/processed/live.json`
+- Upserts into `data/arb_engine.db` (updates existing lines, inserts line changes with new timestamps)
+
+**Step 7 — Run the matcher**
 
 ```bash
 python3 engine/matcher.py
 ```
 
-- Reads `data/processed/live.json` and `data/processed/draftkings_data.json`
+- Auto-syncs staging JSON to SQLite, then queries latest props per player
 - Matches `player_points` on both sides only
 - Picks the closest DraftKings line when duplicates exist
 - Prints flagged edges
@@ -136,7 +148,8 @@ python3 engine/matcher.py
 |---|---|---|
 | `python3 scrapers/draftkings_api.py` | Fetch DK sharp lines → `draftkings_data.json` | ~1 credit/game |
 | `python3 scrapers/prizepicks_api.py` | Parse raw PP JSON → `live.json` | None |
-| `python3 engine/matcher.py` | Compare PP vs DK and print edges | None |
+| `python3 storage/db_manager.py ingest` | Stage JSON → SQLite upsert | None |
+| `python3 engine/matcher.py` | Sync + compare PP vs DK and print edges | None |
 | `python3 local_test.py` | Pretty-print all DK true probabilities | None |
 
 ---
@@ -187,7 +200,15 @@ The matcher stores all lines per player and picks the one **closest** to the Pri
 
 ### Gitignored data
 
-All files under `data/raw/` and `data/processed/` are gitignored. Generate them locally by running the scrapers.
+All files under `data/raw/`, `data/processed/`, and `data/*.db` are gitignored. Generate them locally by running the scrapers.
+
+### SQLite storage
+
+Scrapers still write JSON staging files. `storage/db_manager.py` ingests those files into `data/arb_engine.db` with upsert logic:
+
+- Same player + stat + source + line → update probabilities and timestamp
+- Line change → new row preserved for historical analysis
+- Matcher queries the **latest** props per player per source
 
 ---
 

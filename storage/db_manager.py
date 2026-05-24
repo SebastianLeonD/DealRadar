@@ -1,0 +1,234 @@
+import json
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
+
+DB_PATH = Path('data/arb_engine.db')
+DK_STAGING_FILE = Path('data/processed/draftkings_data.json')
+PP_STAGING_FILE = Path('data/processed/live.json')
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS props (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_name TEXT NOT NULL,
+    team TEXT,
+    stat_type TEXT NOT NULL,
+    line REAL NOT NULL,
+    true_over_prob REAL,
+    true_under_prob REAL,
+    source TEXT NOT NULL CHECK(source IN ('DK', 'PP')),
+    game TEXT,
+    captured_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_props_upsert
+    ON props(player_name, stat_type, source, line);
+
+CREATE INDEX IF NOT EXISTS idx_props_latest
+    ON props(source, stat_type, player_name, captured_at DESC);
+"""
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(db_path)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def init_db(db_path: Path = DB_PATH) -> None:
+    with get_connection(db_path) as connection:
+        connection.executescript(SCHEMA)
+
+
+def upsert_prop(
+    connection: sqlite3.Connection,
+    *,
+    player_name: str,
+    team: str | None,
+    stat_type: str,
+    line: float,
+    source: str,
+    captured_at: str,
+    true_over_prob: float | None = None,
+    true_under_prob: float | None = None,
+    game: str | None = None,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO props (
+            player_name, team, stat_type, line,
+            true_over_prob, true_under_prob, source, game, captured_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(player_name, stat_type, source, line) DO UPDATE SET
+            team = excluded.team,
+            true_over_prob = excluded.true_over_prob,
+            true_under_prob = excluded.true_under_prob,
+            game = excluded.game,
+            captured_at = excluded.captured_at
+        """,
+        (
+            player_name,
+            team,
+            stat_type,
+            line,
+            true_over_prob,
+            true_under_prob,
+            source,
+            game,
+            captured_at,
+        ),
+    )
+
+
+def ingest_draftkings(
+    json_path: Path = DK_STAGING_FILE,
+    db_path: Path = DB_PATH,
+    captured_at: str | None = None,
+) -> int:
+    if not json_path.exists():
+        raise FileNotFoundError(f"Missing DraftKings staging file: {json_path}")
+
+    with json_path.open('r') as file:
+        records = json.load(file)
+
+    timestamp = captured_at or utc_now()
+    count = 0
+
+    init_db(db_path)
+    with get_connection(db_path) as connection:
+        for record in records:
+            upsert_prop(
+                connection,
+                player_name=record['Player'],
+                team=None,
+                stat_type=record.get('Stat', 'player_points'),
+                line=float(record['Line']),
+                true_over_prob=float(record['True_Over_Prob']),
+                true_under_prob=float(record['True_Under_Prob']),
+                source='DK',
+                game=record.get('Game'),
+                captured_at=timestamp,
+            )
+            count += 1
+        connection.commit()
+
+    return count
+
+
+def ingest_prizepicks(
+    json_path: Path = PP_STAGING_FILE,
+    db_path: Path = DB_PATH,
+    captured_at: str | None = None,
+) -> int:
+    if not json_path.exists():
+        raise FileNotFoundError(f"Missing PrizePicks staging file: {json_path}")
+
+    with json_path.open('r') as file:
+        records = json.load(file)
+
+    timestamp = captured_at or utc_now()
+    count = 0
+
+    init_db(db_path)
+    with get_connection(db_path) as connection:
+        for record in records:
+            upsert_prop(
+                connection,
+                player_name=record['name'],
+                team=record.get('team'),
+                stat_type=record['stat_type'],
+                line=float(record['line']),
+                source='PP',
+                captured_at=timestamp,
+            )
+            count += 1
+        connection.commit()
+
+    return count
+
+
+def ingest_staging(
+    db_path: Path = DB_PATH,
+    dk_path: Path = DK_STAGING_FILE,
+    pp_path: Path = PP_STAGING_FILE,
+) -> dict[str, int]:
+    init_db(db_path)
+    results = {}
+
+    if dk_path.exists():
+        results['dk'] = ingest_draftkings(dk_path, db_path)
+    if pp_path.exists():
+        results['pp'] = ingest_prizepicks(pp_path, db_path)
+
+    return results
+
+
+def get_latest_props(
+    source: str,
+    stat_type: str = 'player_points',
+    db_path: Path = DB_PATH,
+) -> list[dict]:
+    init_db(db_path)
+
+    with get_connection(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT p.*
+            FROM props p
+            INNER JOIN (
+                SELECT player_name, MAX(captured_at) AS max_captured_at
+                FROM props
+                WHERE source = ? AND stat_type = ?
+                GROUP BY player_name
+            ) latest
+                ON p.player_name = latest.player_name
+               AND p.captured_at = latest.max_captured_at
+            WHERE p.source = ? AND p.stat_type = ?
+            ORDER BY p.player_name, p.line
+            """,
+            (source, stat_type, source, stat_type),
+        ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Manage arb_engine SQLite storage')
+    parser.add_argument('command', choices=['init', 'ingest'], help='Database action')
+    parser.add_argument('--dk-only', action='store_true', help='Ingest DraftKings staging only')
+    parser.add_argument('--pp-only', action='store_true', help='Ingest PrizePicks staging only')
+    args = parser.parse_args()
+
+    if args.command == 'init':
+        init_db()
+        print(f"Initialized database at {DB_PATH}")
+        return
+
+    init_db()
+    if args.dk_only:
+        count = ingest_draftkings()
+        print(f"Ingested {count} DraftKings props into {DB_PATH}")
+        return
+
+    if args.pp_only:
+        count = ingest_prizepicks()
+        print(f"Ingested {count} PrizePicks props into {DB_PATH}")
+        return
+
+    results = ingest_staging()
+    if not results:
+        raise SystemExit('No staging JSON files found to ingest.')
+
+    for source, count in results.items():
+        print(f"Ingested {count} {source.upper()} props into {DB_PATH}")
+
+
+if __name__ == '__main__':
+    main()
