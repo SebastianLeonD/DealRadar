@@ -26,6 +26,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_props_upsert
 
 CREATE INDEX IF NOT EXISTS idx_props_latest
     ON props(source, stat_type, player_name, captured_at DESC);
+
+CREATE TABLE IF NOT EXISTS edges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pp_player_name TEXT NOT NULL,
+    dk_player_name TEXT NOT NULL,
+    team TEXT,
+    stat_type TEXT NOT NULL,
+    play TEXT NOT NULL CHECK(play IN ('OVER', 'UNDER')),
+    pp_line REAL NOT NULL,
+    dk_line_at_flag REAL NOT NULL,
+    edge_type TEXT NOT NULL,
+    dk_over_prob REAL,
+    dk_under_prob REAL,
+    probability_text TEXT,
+    flagged_at TEXT NOT NULL,
+    pp_captured_at TEXT,
+    dk_captured_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_edges_flagged_at
+    ON edges(flagged_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_edges_dk_player
+    ON edges(dk_player_name, stat_type, flagged_at DESC);
 """
 
 
@@ -195,6 +219,109 @@ def get_latest_props(
         ).fetchall()
 
     return [dict(row) for row in rows]
+
+
+def log_edges(
+    edges: list[dict],
+    db_path: Path = DB_PATH,
+    flagged_at: str | None = None,
+) -> int:
+    if not edges:
+        return 0
+
+    init_db(db_path)
+    timestamp = flagged_at or utc_now()
+
+    with get_connection(db_path) as connection:
+        for edge in edges:
+            connection.execute(
+                """
+                INSERT INTO edges (
+                    pp_player_name, dk_player_name, team, stat_type, play,
+                    pp_line, dk_line_at_flag, edge_type, dk_over_prob,
+                    dk_under_prob, probability_text, flagged_at,
+                    pp_captured_at, dk_captured_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    edge['pp_player_name'],
+                    edge['dk_player_name'],
+                    edge.get('team'),
+                    edge['stat_type'],
+                    edge['play'],
+                    edge['pp_line'],
+                    edge['dk_line_at_flag'],
+                    edge['edge_type'],
+                    edge.get('dk_over_prob'),
+                    edge.get('dk_under_prob'),
+                    edge.get('probability_text'),
+                    timestamp,
+                    edge.get('pp_captured_at'),
+                    edge.get('dk_captured_at'),
+                ),
+            )
+        connection.commit()
+
+    return len(edges)
+
+
+def get_edges(
+    stat_type: str = 'player_points',
+    db_path: Path = DB_PATH,
+) -> list[dict]:
+    init_db(db_path)
+
+    with get_connection(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM edges
+            WHERE stat_type = ?
+            ORDER BY flagged_at DESC, id DESC
+            """,
+            (stat_type,),
+        ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def get_latest_dk_line(
+    player_name: str,
+    stat_type: str = 'player_points',
+    db_path: Path = DB_PATH,
+    reference_line: float | None = None,
+) -> dict | None:
+    init_db(db_path)
+
+    with get_connection(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT p.line, p.captured_at, p.true_over_prob, p.true_under_prob
+            FROM props p
+            INNER JOIN (
+                SELECT MAX(captured_at) AS max_captured_at
+                FROM props
+                WHERE source = 'DK'
+                  AND stat_type = ?
+                  AND player_name = ?
+            ) latest
+                ON p.captured_at = latest.max_captured_at
+            WHERE p.source = 'DK'
+              AND p.stat_type = ?
+              AND p.player_name = ?
+            ORDER BY p.line
+            """,
+            (stat_type, player_name, stat_type, player_name),
+        ).fetchall()
+
+    if not rows:
+        return None
+
+    lines = [dict(row) for row in rows]
+    if reference_line is None or len(lines) == 1:
+        return lines[0]
+
+    return min(lines, key=lambda row: abs(row['line'] - reference_line))
 
 
 def main() -> None:

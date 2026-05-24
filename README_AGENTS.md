@@ -11,6 +11,8 @@ This engine finds mathematical edges on NBA **player points** by comparing Prize
 1. **Line discrepancies** — PrizePicks line differs from the sharp book (auto OVER/UNDER)
 2. **+EV juice** — Same line, but true probability exceeds the PrizePicks break-even threshold (54.25%)
 
+Every flagged edge is **logged to SQLite** for historical tracking and **Closing Line Value (CLV)** analysis.
+
 ---
 
 ## Directory Structure
@@ -22,20 +24,21 @@ Prizepicks/
 ├── requirements.txt              # Python dependencies
 ├── scrapers/
 │   ├── draftkings_api.py         # Fetches sharp lines from The-Odds-API
-│   └── prizepicks_api.py         # Parses raw PrizePicks JSON into flat format
+│   └── prizepicks_api.py         # Parses pasted PP raw JSON into flat format
 ├── engine/
-│   └── matcher.py                # Compares PP vs DK and prints edge alerts
+│   ├── matcher.py                # Finds edges, fuzzy name match, logs to DB
+│   ├── clv_report.py             # CLV report from logged edges
+│   └── name_matcher.py           # Fuzzy player name matching
 ├── storage/
-│   └── db_manager.py             # SQLite ingestion and queries
+│   └── db_manager.py             # SQLite ingestion, props + edges tables
 ├── data/
 │   ├── arb_engine.db             # Local SQLite database (gitignored)
 │   ├── raw/
-│   │   └── prizepicks_raw.json   # Unprocessed PrizePicks API dump (gitignored)
+│   │   └── prizepicks_raw.json   # Pasted PrizePicks API dump (gitignored)
 │   └── processed/
 │       ├── draftkings_data.json  # Flattened sharp lines (gitignored)
 │       └── live.json             # Parsed PP points board (gitignored)
-├── local_test.py                 # Pretty-prints DraftKings probabilities
-└── manual_parse.py               # Legacy parser (use prizepicks_api.py instead)
+└── local_test.py                 # Pretty-prints DraftKings probabilities
 ```
 
 ---
@@ -44,101 +47,89 @@ Prizepicks/
 
 Run these once from the **project root** (`Prizepicks/`):
 
-### 1. Create a virtual environment
-
 ```bash
 python3 -m venv venv
-source venv/bin/activate        # macOS/Linux
-# venv\Scripts\activate         # Windows
-```
-
-### 2. Install dependencies
-
-```bash
+source venv/bin/activate
 pip install -r requirements.txt
-```
-
-### 3. Configure your API key
-
-```bash
 cp .env.example .env
 ```
 
-Open `.env` and set your key:
+Add your Odds API key to `.env`:
 
 ```
 ODDS_API_KEY=your_the_odds_api_key_here
 ```
 
-Get a key at [the-odds-api.com](https://the-odds-api.com/).
+Initialize the database:
+
+```bash
+python3 storage/db_manager.py init
+```
 
 ---
 
-## Step-by-Step: Run a Full Analysis
+## Step-by-Step: Full Analysis Workflow
 
-Always run commands from the **project root**.
+Always run from the **project root**.
 
-**Step 1 — Activate the environment**
-
-```bash
-cd "/Users/sebastianleon/Documents/Code Portfolio/Prizepicks"
-source venv/bin/activate
-```
-
-**Step 2 — Fetch fresh DraftKings sharp lines**
+### 1. Fetch DraftKings sharp lines
 
 ```bash
 python3 scrapers/draftkings_api.py
 ```
 
-- Calls The-Odds-API for today's NBA games (0 credits)
-- Fetches `player_points` props from DraftKings (1 credit per game)
+- Fetches `player_points` for today's NBA slate (~1 API credit per game)
 - De-vigs American odds into true Over/Under probabilities
 - Saves to `data/processed/draftkings_data.json`
 
-**Step 3 — (Optional) Inspect the sharp data**
+### 2. Paste PrizePicks raw JSON
 
-```bash
-python3 local_test.py
-```
-
-**Step 4 — Paste PrizePicks raw JSON**
-
-Save your PrizePicks API dump to:
+Save your PrizePicks board capture to:
 
 ```
 data/raw/prizepicks_raw.json
 ```
 
-**Step 5 — Parse PrizePicks points board**
+There is **no live PP scraper** — manual paste is intentional.
+
+### 3. Parse PrizePicks points board
 
 ```bash
 python3 scrapers/prizepicks_api.py
 ```
 
-- Reads `data/raw/prizepicks_raw.json`
-- Extracts **single-stat Points only** (excludes Fantasy Score, PRA, combos, multi-player slips)
-- Saves to `data/processed/live.json` as `player_points`
+- Extracts **single-stat Points only** (excludes Fantasy Score, PRA, combos)
+- Saves to `data/processed/live.json`
 
-**Step 6 — Ingest staging JSON into SQLite**
-
-```bash
-python3 storage/db_manager.py ingest
-```
-
-- Reads `data/processed/draftkings_data.json` and `data/processed/live.json`
-- Upserts into `data/arb_engine.db` (updates existing lines, inserts line changes with new timestamps)
-
-**Step 7 — Run the matcher**
+### 4. Run the matcher (find + log edges)
 
 ```bash
 python3 engine/matcher.py
 ```
 
-- Auto-syncs staging JSON to SQLite, then queries latest props per player
-- Matches `player_points` on both sides only
-- Picks the closest DraftKings line when duplicates exist
+- Syncs JSON staging → SQLite
+- Fuzzy-matches PP player names to DK names
+- Compares latest `player_points` lines
 - Prints flagged edges
+- **Logs every edge to the `edges` table**
+
+### 5. Re-scrape DK closer to tip-off (recommended for CLV)
+
+```bash
+python3 scrapers/draftkings_api.py
+```
+
+This captures line movement before game time.
+
+### 6. Run the CLV report
+
+```bash
+python3 engine/clv_report.py
+```
+
+- Compares your logged PP line vs the **latest DK line**
+- Shows line movement and CLV per play
+- Summarizes positive CLV rate and average CLV
 
 ---
 
@@ -146,69 +137,35 @@ python3 engine/matcher.py
 
 | Command | What it does | API cost |
 |---|---|---|
-| `python3 scrapers/draftkings_api.py` | Fetch DK sharp lines → `draftkings_data.json` | ~1 credit/game |
-| `python3 scrapers/prizepicks_api.py` | Parse raw PP JSON → `live.json` | None |
-| `python3 storage/db_manager.py ingest` | Stage JSON → SQLite upsert | None |
-| `python3 engine/matcher.py` | Sync + compare PP vs DK and print edges | None |
-| `python3 local_test.py` | Pretty-print all DK true probabilities | None |
+| `python3 scrapers/draftkings_api.py` | Fetch DK sharp lines → JSON staging | ~1 credit/game |
+| `python3 scrapers/prizepicks_api.py` | Parse pasted PP raw JSON → `live.json` | None |
+| `python3 storage/db_manager.py ingest` | Manual JSON → SQLite sync | None |
+| `python3 engine/matcher.py` | Find edges, fuzzy match, log to DB | None |
+| `python3 engine/clv_report.py` | CLV report from logged edges | None |
+| `python3 local_test.py` | Inspect DK true probabilities | None |
 
 ---
 
-## Data File Schemas
+## Database Tables
 
-### DraftKings output (`data/processed/draftkings_data.json`)
+### `props` — line history from every scrape
 
-```json
-{
-  "Player": "Jalen Brunson",
-  "Game": "New York Knicks @ Cleveland Cavaliers",
-  "Stat": "player_points",
-  "Line": 25.5,
-  "True_Over_Prob": 50.21,
-  "True_Under_Prob": 49.79
-}
-```
+| Column | Purpose |
+|---|---|
+| `player_name`, `line`, `source` | DK or PP line snapshot |
+| `true_over_prob`, `true_under_prob` | DK de-vigged probs (NULL for PP) |
+| `captured_at` | When the line was scraped |
 
-### PrizePicks output (`data/processed/live.json`)
+Upsert key: `(player_name, stat_type, source, line)`. Line changes create new historical rows.
 
-```json
-{
-  "name": "Jalen Brunson",
-  "team": "New York Knicks",
-  "stat_type": "player_points",
-  "line": 25.5
-}
-```
+### `edges` — every flagged play from the matcher
 
----
-
-## Things You Need to Know
-
-### Points only
-
-- Both scrapers and the matcher are locked to **`player_points`**
-- PrizePicks raw data includes Fantasy Score, PRA, Pts+Rebs, and combo props — **excluded** at parse time
-- Only exact raw stat type `"Points"` is ingested (not `"Points (Combo)"`)
-
-### Always run from the project root
-
-All scripts use relative paths like `data/processed/...`.
-
-### Duplicate DraftKings lines
-
-The matcher stores all lines per player and picks the one **closest** to the PrizePicks line before comparing.
-
-### Gitignored data
-
-All files under `data/raw/`, `data/processed/`, and `data/*.db` are gitignored. Generate them locally by running the scrapers.
-
-### SQLite storage
-
-Scrapers still write JSON staging files. `storage/db_manager.py` ingests those files into `data/arb_engine.db` with upsert logic:
-
-- Same player + stat + source + line → update probabilities and timestamp
-- Line change → new row preserved for historical analysis
-- Matcher queries the **latest** props per player per source
+| Column | Purpose |
+|---|---|
+| `pp_player_name`, `dk_player_name` | Names used (may differ if fuzzy matched) |
+| `play`, `pp_line`, `dk_line_at_flag` | What you would bet and at what numbers |
+| `edge_type` | Line Discrepancy or +EV Odds Juice |
+| `flagged_at` | When the edge was detected |
 
 ---
 
@@ -225,20 +182,71 @@ Scrapers still write JSON staging files. `storage/db_manager.py` ingests those f
 
 ---
 
+## Fuzzy Name Matching
+
+PrizePicks and DraftKings sometimes spell names differently (e.g. `"PJ Washington"` vs `"P.J. Washington"`).
+
+`engine/name_matcher.py` normalizes names and fuzzy-matches at **88% similarity**. When a fuzzy match is used, the matcher prints:
+
+```
+Fuzzy matched 1 player name(s):
+  PJ Washington -> P.J. Washington (92%)
+```
+
+---
+
+## Closing Line Value (CLV)
+
+**CLV** measures whether you got a better number than the market settled at.
+
+| Play | Positive CLV means |
+|---|---|
+| **OVER** | Latest DK line moved **above** your PP line |
+| **UNDER** | Latest DK line moved **below** your PP line |
+
+**Best practice:**
+1. Run matcher when you see edges → edges logged with `dk_line_at_flag`
+2. Re-scrape DK closer to tip-off
+3. Run `python3 engine/clv_report.py`
+
+The report shows `DK@FLAG` (line when edge was found), `DK NOW` (latest scrape), `MOVE`, and `CLV`.
+
+---
+
+## Things You Need to Know
+
+### Points only
+
+Both scrapers and the matcher are locked to **`player_points`**. Fantasy Score, PRA, and combo props are excluded at parse time.
+
+### Always run from the project root
+
+All scripts use relative paths like `data/processed/...`.
+
+### Duplicate DraftKings lines
+
+The matcher picks the DK line **closest** to the PP line when alternates exist.
+
+### Gitignored data
+
+All files under `data/raw/`, `data/processed/`, and `data/*.db` are gitignored. Generate locally by running the pipeline.
+
+---
+
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| `Missing ODDS_API_KEY` | Create `.env` from `.env.example` and add your key |
-| `Could not find data/processed/draftkings_data.json` | Run `python3 scrapers/draftkings_api.py` first |
-| `Could not find data/processed/live.json` | Run `python3 scrapers/prizepicks_api.py` first |
-| `Missing raw file: data/raw/prizepicks_raw.json` | Save a PrizePicks API dump to that path |
-| No edges found | Normal if nothing clears the threshold — check stale cache or name mismatches |
+| `Missing ODDS_API_KEY` | Create `.env` from `.env.example` |
+| `Could not find live.json` | Run `python3 scrapers/prizepicks_api.py` |
+| `No logged edges found` | Run `python3 engine/matcher.py` first |
+| PP players skipped | Name mismatch — check fuzzy match output |
+| CLV all zeros on MOVE | Re-scrape DK; lines haven't moved since flag |
 
 ---
 
 ## Engineering Backlog
 
-1. **Automated name normalization** — Handle "PJ Washington" vs "P.J. Washington" with fuzzy matching
-2. **Multi-market scaling** — Expand both scrapers to rebounds, assists, threes with stat-type-aware matching
-3. **Live PrizePicks API scraper** — Replace manual JSON dump with automated board fetch
+1. **Multi-market scaling** — Rebounds, assists, threes with stat-type-aware matching
+2. **Edge deduplication** — Collapse repeat flags for same player/play within a session
+3. **Pre-game closing snapshot** — Auto-tag last DK scrape before game start as "closing line"
