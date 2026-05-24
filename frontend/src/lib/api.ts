@@ -78,7 +78,7 @@ export interface ActionInfo {
   writes_to: string;
 }
 
-const BASE = "/api";
+const BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8800/api";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE}${path}`, init);

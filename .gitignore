@@ -4,3 +4,5 @@ __pycache__/
 data/raw/*
 data/processed/*
 data/*.db
+frontend/node_modules/
+frontend/dist/

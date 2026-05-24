@@ -13,7 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from engine.matcher import find_edges
 from storage.db_manager import DB_PATH, ingest_staging
-from web_ui.components import (
+from services.pipeline import (
     ACTION_CATALOG,
     build_clv_dataframe,
     clv_daily_summary,
@@ -36,27 +36,19 @@ app.add_middleware(
 )
 
 
-def _parse_feed_status(label: str) -> str:
-    if "Fresh" in label:
-        return "fresh"
-    if "Aging" in label:
-        return "aging"
-    return "stale"
-
-
 @app.get("/api/status/feeds")
 def get_feed_status():
-    dk_label, dk_detail = format_status_label("DK")
-    pp_label, pp_detail = format_status_label("PP")
+    dk_status, dk_detail = format_status_label("DK")
+    pp_status, pp_detail = format_status_label("PP")
     return {
         "draftkings": {
-            "status": _parse_feed_status(dk_label),
-            "label": dk_label.replace("🟢 ", "").replace("🟡 ", "").replace("🔴 ", "").upper(),
+            "status": dk_status,
+            "label": dk_status.upper(),
             "detail": dk_detail,
         },
         "prizepicks": {
-            "status": _parse_feed_status(pp_label),
-            "label": pp_label.replace("🟢 ", "").replace("🟡 ", "").replace("🔴 ", "").upper(),
+            "status": pp_status,
+            "label": pp_status.upper(),
             "detail": pp_detail,
         },
         "database": {

@@ -2,14 +2,24 @@
 # Start both the FastAPI backend and React frontend dev servers.
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+API_PORT="${API_PORT:-8800}"
 
-echo "Starting API on http://127.0.0.1:8000"
+if [ -f "$ROOT/venv/bin/activate" ]; then
+  # shellcheck source=/dev/null
+  source "$ROOT/venv/bin/activate"
+fi
+
+echo "Starting API on http://127.0.0.1:${API_PORT}"
 cd "$ROOT"
-python3 -m uvicorn api.main:app --reload --port 8000 &
+python3 -m uvicorn api.main:app --reload --port "$API_PORT" &
 API_PID=$!
 
-echo "Starting frontend on http://127.0.0.1:5173"
+echo "Starting frontend on http://127.0.0.1:5173 (proxying /api -> :${API_PORT})"
 cd "$ROOT/frontend"
+if [ ! -d node_modules ]; then
+  echo "Installing frontend dependencies..."
+  npm install
+fi
 npm run dev &
 WEB_PID=$!
 

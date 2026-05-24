@@ -22,6 +22,12 @@ Prizepicks/
 ├── .env                          # Your API key (NEVER commit this)
 ├── .env.example                  # Template for setup
 ├── requirements.txt              # Python dependencies
+├── api/
+│   └── main.py                   # FastAPI backend for the React dashboard
+├── frontend/                     # React + TypeScript + Tailwind UI
+│   └── src/                      # Execution, Opportunities, CLV pages
+├── services/
+│   └── pipeline.py               # Shared pipeline logic and DB queries
 ├── scrapers/
 │   ├── draftkings_api.py         # Fetches sharp lines from The-Odds-API
 │   └── prizepicks_api.py         # Parses pasted PP raw JSON into flat format
@@ -29,9 +35,6 @@ Prizepicks/
 │   ├── matcher.py                # Finds edges, fuzzy name match, logs to DB
 │   ├── clv_report.py             # CLV report from logged edges
 │   └── name_matcher.py           # Fuzzy player name matching
-├── web_ui/
-│   ├── app.py                    # Streamlit trading desk dashboard
-│   └── components.py             # UI helpers and DB queries
 ├── storage/
 │   └── db_manager.py             # SQLite ingestion, props + edges tables
 ├── data/
@@ -132,24 +135,36 @@ python3 engine/clv_report.py
 
 ---
 
-## Streamlit Dashboard
+## Dashboard (React + FastAPI)
 
-Launch the trading desk UI:
+Launch the control center UI:
 
 ```bash
-pip install -r requirements.txt
-streamlit run web_ui/app.py
+# Terminal 1 — API
+source venv/bin/activate
+python -m uvicorn api.main:app --reload --port 8800
+
+# Terminal 2 — Frontend (calls API at http://127.0.0.1:8800/api)
+cd frontend && npm install && npm run dev
 ```
 
-### Tabs
+Or start both at once:
 
-| Tab | Purpose |
+```bash
+chmod +x scripts/dev.sh && ./scripts/dev.sh
+```
+
+Open **http://localhost:5173**
+
+### Pages
+
+| Page | Purpose |
 |---|---|
-| **Execution** | Pipeline buttons, DK/PP freshness indicators |
-| **Active Opportunities** | Neon card-style edge table, filters, CSV download |
-| **CLV Performance** | CLV cards, positive CLV rate, 7-day average CLV chart |
+| **Execution** | Pipeline buttons, DK/PP freshness indicators, subprocess log |
+| **Active Opportunities** | Edge table with filters, metric cards, CSV download |
+| **CLV Performance** | CLV metrics, 7-day chart, movement table |
 
-Edit `data/raw/prizepicks_raw.json` in your IDE before parsing from the Execution tab.
+Edit `data/raw/prizepicks_raw.json` in your IDE before parsing from the Execution page.
 
 ---
 
@@ -162,7 +177,7 @@ Edit `data/raw/prizepicks_raw.json` in your IDE before parsing from the Executio
 | `python3 storage/db_manager.py ingest` | Manual JSON → SQLite sync | None |
 | `python3 engine/matcher.py` | Find edges, fuzzy match, log to DB | None |
 | `python3 engine/clv_report.py` | CLV report from logged edges | None |
-| `streamlit run web_ui/app.py` | Launch trading desk dashboard | None |
+| `./scripts/dev.sh` | Launch React dashboard + API | None |
 | `python3 local_test.py` | Inspect DK true probabilities | None |
 
 ---
