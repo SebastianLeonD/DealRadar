@@ -150,9 +150,8 @@ python3 scrapers/prizepicks_api.py
 
 **What it does:**
 - Reads the raw JSON:API payload from `data/raw/prizepicks_raw.json`
-- Extracts player name, team, stat type, and line (standard odds only)
-- Maps `Points` → `player_points` for DraftKings alignment
-- Saves to `data/processed/prizepicks_live.json`
+- Extracts **single-stat Points only** (excludes Fantasy Score, PRA, combos, and multi-player slips)
+- Saves to `data/processed/prizepicks_live.json` as `player_points`
 
 **Step 5 — Point the matcher at live PrizePicks data**
 
@@ -229,12 +228,12 @@ All scripts use relative paths like `data/processed/...`. If you run from inside
 
 DraftKings sometimes has multiple lines for the same player (e.g. main line 17.5 and alternate 13.5). The matcher stores **all** lines per player and picks the one **closest** to the PrizePicks line before comparing. This prevents false edges from silently using the wrong line.
 
-### Stat type alignment (current limitation)
+### Stat type filtering (points only)
 
-- DraftKings scraper only pulls `player_points` today
-- PrizePicks live board includes combo stats (PRA, Pts+Rebs, etc.)
-- The matcher matches by **player name only** — it does not filter by stat type yet
-- For accurate analysis, filter `prizepicks_live.json` to `player_points` entries only, or expand the DraftKings scraper to multi-market (see backlog)
+- Both scrapers and the matcher are locked to **`player_points`** for now
+- PrizePicks raw data includes Fantasy Score, PRA, Pts+Rebs, and combo props — these are **excluded** at parse time
+- Only exact raw stat type `"Points"` is ingested (not `"Points (Combo)"`)
+- The matcher double-checks `stat_type` / `Stat` on both sides before comparing
 
 ### Gitignored vs tracked files
 
@@ -305,7 +304,6 @@ DraftKings sometimes has multiple lines for the same player (e.g. main line 17.5
 ## Engineering Backlog
 
 1. **Automated name normalization** — Handle "PJ Washington" vs "P.J. Washington" with fuzzy matching
-2. **Multi-market scaling** — Expand DraftKings scraper to rebounds, assists, threes
-3. **Stat-type filtering in matcher** — Only compare `player_points` to `player_points`, etc.
-4. **CLI flag for matcher** — `--source mock|live` instead of editing `PRIZEPICKS_FILE` manually
-5. **Live PrizePicks API scraper** — Replace manual JSON dump with automated board fetch
+2. **Multi-market scaling** — Expand both scrapers to rebounds, assists, threes with stat-type-aware matching
+3. **CLI flag for matcher** — `--source mock|live` instead of editing `PRIZEPICKS_FILE` manually
+4. **Live PrizePicks API scraper** — Replace manual JSON dump with automated board fetch

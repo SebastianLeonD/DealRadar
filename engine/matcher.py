@@ -2,6 +2,7 @@ import json
 
 PRIZEPICKS_FILE = 'data/processed/prizepicks_mock.json'
 SHARP_FILE = 'data/processed/draftkings_data.json'
+TARGET_STAT = 'player_points'
 EV_THRESHOLD = 54.25  # The PrizePicks break-even point for a 5/6-slip
 
 def load_json_file(filename):
@@ -12,9 +13,15 @@ def load_json_file(filename):
         print(f"Error: Could not find {filename}")
         return None
 
+def is_target_stat(record, stat_key, target_stat):
+    stat_value = record.get(stat_key, target_stat)
+    return stat_value == target_stat
+
 def build_sharp_map(sharp_data):
     sharp_map = {}
     for player in sharp_data:
+        if not is_target_stat(player, 'Stat', TARGET_STAT):
+            continue
         sharp_map.setdefault(player['Player'], []).append(player)
     return sharp_map
 
@@ -29,11 +36,16 @@ def find_edges():
         print("Make sure both JSON files exist and have data.")
         return
 
+    pp_data = [p for p in pp_data if is_target_stat(p, 'stat_type', TARGET_STAT)]
     sharp_map = build_sharp_map(sharp_data)
+
+    if not pp_data:
+        print(f"No PrizePicks lines found for stat type '{TARGET_STAT}'.")
+        return
     
     flagged_bets = []
 
-    print(f"Scanning {len(pp_data)} PrizePicks lines against sharp lines...\n")
+    print(f"Scanning {len(pp_data)} PrizePicks {TARGET_STAT} lines against sharp lines...\n")
 
     for pp_player in pp_data:
         name = pp_player['name']

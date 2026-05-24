@@ -4,11 +4,12 @@ from pathlib import Path
 RAW_FILE = Path('data/raw/prizepicks_raw.json')
 OUTPUT_FILE = Path('data/processed/prizepicks_live.json')
 
+# Only ingest single-stat "Points" props. Excludes Fantasy Score, PRA,
+# Pts+Rebs, and "Points (Combo)" multi-player slips.
+ALLOWED_RAW_STAT_TYPES = {'Points'}
+
 STAT_TYPE_MAP = {
     'Points': 'player_points',
-    'Rebounds': 'player_rebounds',
-    'Assists': 'player_assists',
-    '3-PT Made': 'player_threes',
 }
 
 
@@ -54,6 +55,8 @@ def parse_prizepicks_board(raw_data):
         stat_type = attrs.get('stat_type')
         if line is None or not stat_type:
             continue
+        if stat_type not in ALLOWED_RAW_STAT_TYPES:
+            continue
 
         clean_picks.append({
             'name': player_attrs['name'],
@@ -78,8 +81,8 @@ def main():
     with OUTPUT_FILE.open('w') as file:
         json.dump(clean_picks, file, indent=4)
 
-    print(f"Successfully mapped {len(clean_picks)} standard props.")
-    print(f"Saved live board to {OUTPUT_FILE}")
+    print(f"Successfully mapped {len(clean_picks)} player_points props.")
+    print(f"Saved points-only board to {OUTPUT_FILE}")
     for pick in clean_picks[:5]:
         print(pick)
 
