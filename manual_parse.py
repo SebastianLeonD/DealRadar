@@ -1,7 +1,7 @@
 import json
 
 # 1. Load the JSON file you saved
-with open('data.json', 'r') as file:
+with open('data/raw/prizepicks_raw.json', 'r') as file:
     raw_data = json.load(file)
 
 projections = raw_data.get('data', [])

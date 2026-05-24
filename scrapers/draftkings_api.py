@@ -1,9 +1,11 @@
-
+import os
 import requests
 import time
 import json
+from dotenv import load_dotenv
 
-API_KEY = '474da336ad8ac132c8a791c2ba23b1db'
+load_dotenv()
+API_KEY = os.getenv('ODDS_API_KEY')
 SPORT = 'basketball_nba' 
 MARKET = 'player_points' 
 BOOKMAKER = 'draftkings' 
@@ -57,6 +59,9 @@ def fetch_event_odds(event_id):
 
 # 4. Run the Pipeline
 if __name__ == "__main__":
+    if not API_KEY:
+        raise SystemExit("Missing ODDS_API_KEY. Add it to your .env file.")
+
     games = fetch_events()
     print(f"Found {len(games)} upcoming games.\n")
     

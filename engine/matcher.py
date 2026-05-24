@@ -12,6 +12,15 @@ def load_json_file(filename):
         print(f"Error: Could not find {filename}")
         return None
 
+def build_sharp_map(sharp_data):
+    sharp_map = {}
+    for player in sharp_data:
+        sharp_map.setdefault(player['Player'], []).append(player)
+    return sharp_map
+
+def pick_closest_line(player_lines, pp_line):
+    return min(player_lines, key=lambda player: abs(player['Line'] - pp_line))
+
 def find_edges():
     pp_data = load_json_file(PRIZEPICKS_FILE)
     sharp_data = load_json_file(SHARP_FILE)
@@ -20,8 +29,7 @@ def find_edges():
         print("Make sure both JSON files exist and have data.")
         return
 
-    # Index the sharp data by player name for instant O(1) lookups
-    sharp_map = {player['Player']: player for player in sharp_data}
+    sharp_map = build_sharp_map(sharp_data)
     
     flagged_bets = []
 
@@ -37,7 +45,7 @@ def find_edges():
         if name not in sharp_map:
             continue
             
-        sharp_player = sharp_map[name]
+        sharp_player = pick_closest_line(sharp_map[name], pp_line)
         dk_line = sharp_player['Line']
         dk_over_prob = sharp_player['True_Over_Prob']
         dk_under_prob = sharp_player['True_Under_Prob']
