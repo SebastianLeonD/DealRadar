@@ -1,99 +1,103 @@
-import { AlertTriangle, Download, Filter } from "lucide-react";
+import { AlertTriangle, Download } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api, type Edge, type EdgesResponse, type RecordSummary } from "../lib/api";
-import { Badge, EmptyState, formatTime, MetricCard, PageHeader } from "../components/ui";
+import {
+  Badge,
+  EmptyState,
+  formatTime,
+  MetricCard,
+  PageHeader,
+  statLabel,
+  verdictWord,
+  WinBar,
+} from "../components/ui";
 
-function verdictVariant(verdict: Edge["verdict"]): "over" | "orange" | "under" | "neutral" {
-  if (verdict === "YES") return "over";
-  if (verdict === "LEAN") return "orange";
-  if (verdict === "NO") return "under";
+function verdictVariant(verdict: Edge["verdict"]): "bet" | "maybe" | "skip" | "neutral" {
+  if (verdict === "YES") return "bet";
+  if (verdict === "LEAN") return "maybe";
+  if (verdict === "NO") return "skip";
   return "neutral";
 }
 
-function resultVariant(result: Edge["result"]): "over" | "under" | "neutral" {
-  if (result === "WIN") return "over";
-  if (result === "LOSS") return "under";
-  return "neutral";
-}
+const GRID = "grid-cols-[1.5fr_1.6fr_0.9fr_1.1fr_0.8fr_0.7fr]";
 
-function rowBorderClass(verdict: Edge["verdict"]): string {
-  if (verdict === "YES")
-    return "border-emerald-500/30 shadow-[inset_0_0_0_1px_rgba(52,211,153,0.06),0_0_20px_rgba(52,211,153,0.04)]";
-  if (verdict === "LEAN")
-    return "border-amber-500/30 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.06),0_0_20px_rgba(251,191,36,0.04)]";
-  return "border-border";
-}
-
-const GRID =
-  "grid-cols-[1.3fr_0.6fr_0.55fr_0.5fr_0.5fr_0.7fr_0.9fr_0.6fr_0.7fr]";
-
-function EdgeRow({ edge }: { edge: Edge }) {
+function PickRow({ edge }: { edge: Edge }) {
+  const word = verdictWord(edge.verdict);
   return (
     <div
-      className={`grid ${GRID} items-center gap-3 rounded-xl border bg-surface-card px-4 py-3.5 ${rowBorderClass(edge.verdict)}`}
+      className={`grid ${GRID} items-center gap-4 border-b border-line px-4 py-4 transition-colors last:border-b-0 hover:bg-paper ${
+        word === "YES" ? "bg-bet-soft/30" : ""
+      }`}
     >
-      <div className="flex items-center gap-2">
+      {/* who */}
+      <div className="flex min-w-0 items-center gap-2">
         <div className="min-w-0">
-          <p className="truncate font-semibold text-text">{edge.player}</p>
-          <p className="truncate text-xs text-text-dim">{edge.team}</p>
+          <p className="truncate font-semibold text-ink">{edge.player}</p>
+          <p className="truncate text-xs text-ink-faint">{edge.team}</p>
         </div>
         {edge.flags && (
-          <span title={edge.flags}>
-            <AlertTriangle size={14} className="shrink-0 text-amber-400" />
+          <span title={edge.flags} className="shrink-0 cursor-help">
+            <AlertTriangle size={15} className="text-maybe" />
           </span>
         )}
       </div>
+
+      {/* the bet, in words */}
       <div>
-        <Badge variant={verdictVariant(edge.verdict)}>{edge.verdict ?? "—"}</Badge>
+        <p className="text-sm font-semibold text-ink">
+          {edge.play === "OVER" ? "Over" : "Under"}{" "}
+          <span className="tnum">{edge.pp_line}</span> {statLabel(edge.stat_type)}
+        </p>
+        <p className="text-xs text-ink-faint">
+          books say <span className="tnum">{edge.dk_line}</span>
+          {edge.book_count ? ` · ${edge.book_count} book${edge.book_count > 1 ? "s" : ""}` : ""}
+        </p>
       </div>
-      <div>
-        <Badge variant={edge.play === "OVER" ? "over" : "under"}>{edge.play}</Badge>
-      </div>
-      <div>
-        <Badge variant="orange">{edge.pp_line}</Badge>
-      </div>
-      <div>
-        <Badge variant="cyan">{edge.dk_line}</Badge>
-      </div>
+
+      {/* win chance */}
       <div>
         {edge.win_prob != null ? (
           <>
-            <p className="text-sm font-semibold text-text">
+            <p className="tnum text-sm font-semibold text-ink">
               {(edge.win_prob * 100).toFixed(1)}%
             </p>
-            <p className="text-xs text-text-dim">
-              {edge.ev_percent != null && edge.ev_percent >= 0 ? "+" : ""}
-              {edge.ev_percent?.toFixed(1)}% EV
-              {edge.book_count ? ` · ${edge.book_count} bk` : ""}
-            </p>
+            <WinBar prob={edge.win_prob} />
           </>
         ) : (
-          <p className="text-xs text-text-dim">—</p>
+          <p className="text-xs text-ink-faint">—</p>
         )}
       </div>
+
+      {/* verdict */}
       <div>
-        <Badge variant={edge.edge_type === "Line Discrepancy" ? "cyan" : "purple"}>
-          {edge.edge_type}
-        </Badge>
+        <Badge variant={verdictVariant(edge.verdict)}>{word}</Badge>
+        {edge.ev_percent != null && (
+          <p className="tnum mt-1 text-xs text-ink-faint">
+            edge {edge.ev_percent >= 0 ? "+" : ""}
+            {edge.ev_percent.toFixed(1)}%
+          </p>
+        )}
       </div>
+
+      {/* result */}
       <div>
         {edge.result ? (
-          <Badge variant={resultVariant(edge.result)}>
-            {edge.result}
-            {edge.actual_value != null ? ` ${edge.actual_value}` : ""}
+          <Badge variant={edge.result === "WIN" ? "bet" : edge.result === "LOSS" ? "skip" : "neutral"}>
+            {edge.result === "WIN" ? "Won" : edge.result === "LOSS" ? "Lost" : "Push"}
+            {edge.actual_value != null ? ` · ${edge.actual_value}` : ""}
           </Badge>
         ) : (
-          <span className="text-xs text-text-dim">open</span>
+          <span className="text-xs text-ink-faint">not played yet</span>
         )}
       </div>
-      <p className="text-xs text-text-dim">{formatTime(edge.flagged_at)}</p>
+
+      <p className="tnum text-right text-xs text-ink-faint">{formatTime(edge.flagged_at)}</p>
     </div>
   );
 }
 
 export function OpportunitiesPage() {
   const [stat, setStat] = useState("All");
-  const [edgeType, setEdgeType] = useState("All");
   const [data, setData] = useState<EdgesResponse | null>(null);
   const [record, setRecord] = useState<RecordSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -101,7 +105,7 @@ export function OpportunitiesPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setData(await api.getEdges(stat, edgeType));
+      setData(await api.getEdges(stat, "All"));
     } catch {
       setData({
         edges: [],
@@ -110,7 +114,7 @@ export function OpportunitiesPage() {
     } finally {
       setLoading(false);
     }
-  }, [stat, edgeType]);
+  }, [stat]);
 
   useEffect(() => {
     load();
@@ -120,89 +124,92 @@ export function OpportunitiesPage() {
     api.getRecord().then(setRecord).catch(() => {});
   }, []);
 
-  const recordLabel = record?.settled
-    ? `${record.wins}W - ${record.losses}L${record.pushes ? ` - ${record.pushes}P` : ""}`
-    : "—";
-
   return (
     <div>
       <PageHeader
-        title="Active Opportunities"
-        subtitle="Every play priced against sharp consensus. YES = bet it, LEAN = your call, flag = trap risk."
+        title="Today's Picks"
+        subtitle="Every PrizePicks line, priced against the bookmakers. YES means bet it. MAYBE means read the warning first."
         action={
           <a
-            href={api.exportEdgesUrl(stat, edgeType)}
-            download="edges.csv"
-            className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-card px-4 py-2 text-sm font-medium text-text hover:bg-surface-hover"
+            href={api.exportEdgesUrl(stat, "All")}
+            download="picks.csv"
+            className="inline-flex items-center gap-2 rounded-md border border-line-strong bg-card px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-ink"
           >
-            <Download size={16} />
-            Download CSV
+            <Download size={15} />
+            Export
           </a>
         }
       />
 
       {data && !loading && (
-        <div className="mb-6 grid grid-cols-4 gap-3">
-          <MetricCard label="YES Plays" value={data.summary.yes_count} />
-          <MetricCard label="Unique Signals" value={data.summary.unique} />
-          <MetricCard label="Settled Record" value={recordLabel} />
+        <div className="rise rise-1 mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <MetricCard label="Bet-worthy today" value={data.summary.yes_count} hint="verdict: YES" />
+          <MetricCard label="Picks found" value={data.summary.unique} hint="above break-even" />
           <MetricCard
-            label="Hit Rate"
+            label="Lifetime record"
+            value={
+              record?.settled
+                ? `${record.wins}–${record.losses}${record.pushes ? `–${record.pushes}` : ""}`
+                : "—"
+            }
+            hint="wins–losses–pushes"
+          />
+          <MetricCard
+            label="Hit rate"
             value={record?.hit_rate != null ? `${record.hit_rate}%` : "—"}
+            hint="needs 54.25% to profit"
           />
         </div>
       )}
 
-      <div className="mb-4 flex items-center gap-3">
-        <Filter size={16} className="text-text-dim" />
+      <div className="rise rise-2 mb-4 flex items-center justify-between">
         <select
           value={stat}
           onChange={(e) => setStat(e.target.value)}
-          className="rounded-lg border border-border bg-surface-card px-3 py-2 text-sm text-text outline-none focus:border-accent/40"
+          className="rounded-md border border-line-strong bg-card px-3 py-2 text-sm font-medium text-ink outline-none focus:border-ink"
         >
-          <option value="All">Stat: All</option>
+          <option value="All">All stats</option>
           {(data?.summary.stats ?? []).map((s) => (
             <option key={s} value={s}>
-              Stat: {s.replace("player_", "")}
+              {statLabel(s)}
             </option>
           ))}
         </select>
-        <select
-          value={edgeType}
-          onChange={(e) => setEdgeType(e.target.value)}
-          className="rounded-lg border border-border bg-surface-card px-3 py-2 text-sm text-text outline-none focus:border-accent/40"
-        >
-          <option value="All">All Edge Types</option>
-          <option value="Line Discrepancy">Line Discrepancy</option>
-          <option value="+EV Odds Juice">+EV Odds Juice</option>
-        </select>
+        <p className="text-xs text-ink-faint">
+          Hover the <AlertTriangle size={11} className="inline text-maybe" /> icon to read a
+          pick's warning
+        </p>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-border bg-surface-raised">
+      <div className="rise rise-3 overflow-hidden rounded-lg border border-line bg-card">
         <div
-          className={`grid ${GRID} gap-3 border-b border-border px-4 py-3 text-xs font-semibold uppercase tracking-widest text-text-dim`}
+          className={`grid ${GRID} gap-4 border-b-2 border-ink px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft`}
         >
           <span>Player</span>
+          <span>The bet</span>
+          <span>Win chance</span>
           <span>Verdict</span>
-          <span>Play</span>
-          <span>PP</span>
-          <span>Sharp</span>
-          <span>Win % / EV</span>
-          <span>Edge Type</span>
           <span>Result</span>
-          <span>Flagged</span>
+          <span className="text-right">Found</span>
         </div>
 
-        <div className="space-y-2 p-3">
-          {loading ? (
-            <EmptyState message="Loading opportunities..." />
-          ) : !data?.edges.length ? (
-            <EmptyState message="No active opportunities yet. Run edge detection first." />
-          ) : (
-            data.edges.map((edge) => <EdgeRow key={edge.id} edge={edge} />)
-          )}
-        </div>
+        {loading ? (
+          <div className="p-4">
+            <EmptyState message="Loading picks..." />
+          </div>
+        ) : !data?.edges.length ? (
+          <div className="p-4">
+            <EmptyState message="No picks yet. Go to Update Data and run the pipeline." />
+          </div>
+        ) : (
+          data.edges.map((edge) => <PickRow key={edge.id} edge={edge} />)
+        )}
       </div>
+
+      <p className="rise rise-4 mt-4 text-xs leading-relaxed text-ink-faint">
+        The small tick on each win-chance bar marks 54.25% — the break-even point. Picks below
+        it lose money long-term, so they never appear here.
+      </p>
     </div>
   );
 }

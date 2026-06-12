@@ -1,27 +1,44 @@
 import type { ReactNode } from "react";
 
-interface BadgeProps {
-  children: ReactNode;
-  variant?: "fresh" | "aging" | "stale" | "online" | "cyan" | "purple" | "orange" | "over" | "under" | "neutral";
+/* ---------- plain-english translators ---------- */
+
+export function verdictWord(verdict: string | null): "YES" | "MAYBE" | "SKIP" | "—" {
+  if (verdict === "YES") return "YES";
+  if (verdict === "LEAN") return "MAYBE";
+  if (verdict === "NO") return "SKIP";
+  return "—";
 }
 
-const variantStyles: Record<NonNullable<BadgeProps["variant"]>, string> = {
-  fresh: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  aging: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
-  stale: "bg-rose-500/15 text-rose-400 border-rose-500/30",
-  online: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  cyan: "bg-cyan-500/12 text-cyan-400 border-cyan-500/25",
-  purple: "bg-purple-500/12 text-purple-400 border-purple-500/25",
-  orange: "bg-amber-500/12 text-amber-400 border-amber-500/25",
-  over: "bg-emerald-500/12 text-emerald-400 border-emerald-500/25",
-  under: "bg-rose-500/12 text-rose-400 border-rose-500/25",
-  neutral: "bg-white/5 text-text-muted border-border",
+export function statLabel(stat: string | null): string {
+  if (!stat) return "";
+  const firstHalf = stat.endsWith("_1h");
+  const base = stat
+    .replace(/_1h$/, "")
+    .replace(/^player_/, "")
+    .replaceAll("_", " ");
+  return firstHalf ? `${base} · 1st half` : base;
+}
+
+/* ---------- primitives ---------- */
+
+interface BadgeProps {
+  children: ReactNode;
+  variant?: "bet" | "maybe" | "skip" | "info" | "neutral" | "ink";
+}
+
+const badgeStyles: Record<NonNullable<BadgeProps["variant"]>, string> = {
+  bet: "bg-bet-soft text-bet border-bet/25",
+  maybe: "bg-maybe-soft text-maybe border-maybe/25",
+  skip: "bg-skip-soft text-skip border-skip/25",
+  info: "bg-info-soft text-info border-info/20",
+  neutral: "bg-paper text-ink-soft border-line",
+  ink: "bg-ink text-card border-ink",
 };
 
 export function Badge({ children, variant = "neutral" }: BadgeProps) {
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold tracking-wide ${variantStyles[variant]}`}
+      className={`inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-semibold tracking-wide ${badgeStyles[variant]}`}
     >
       {children}
     </span>
@@ -31,16 +48,17 @@ export function Badge({ children, variant = "neutral" }: BadgeProps) {
 interface MetricCardProps {
   label: string;
   value: string | number;
+  hint?: string;
 }
 
-export function MetricCard({ label, value }: MetricCardProps) {
+export function MetricCard({ label, value, hint }: MetricCardProps) {
   return (
-    <div className="relative overflow-hidden rounded-xl border border-border bg-surface-card px-5 py-4">
-      <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-accent/80 to-cyan-500/40" />
-      <p className="text-xs font-medium uppercase tracking-widest text-text-dim">
+    <div className="rounded-lg border border-line bg-card px-5 py-4">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
         {label}
       </p>
-      <p className="mt-1 text-3xl font-bold tracking-tight text-text">{value}</p>
+      <p className="tnum mt-1.5 text-3xl font-semibold text-ink">{value}</p>
+      {hint && <p className="mt-1 text-xs text-ink-faint">{hint}</p>}
     </div>
   );
 }
@@ -53,24 +71,39 @@ interface PageHeaderProps {
 
 export function PageHeader({ title, subtitle, action }: PageHeaderProps) {
   return (
-    <div className="mb-8 flex items-start justify-between gap-4">
+    <div className="rise mb-8 flex items-end justify-between gap-4 border-b-2 border-ink pb-5">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-text">{title}</h1>
-        <p className="mt-1 text-sm text-text-muted">{subtitle}</p>
+        <h1
+          className="text-[34px] font-bold leading-none tracking-tight text-ink"
+          style={{ fontFamily: "var(--font-display)" }}
+        >
+          {title}
+        </h1>
+        <p className="mt-2 text-sm text-ink-soft">{subtitle}</p>
       </div>
       {action}
     </div>
   );
 }
 
-interface EmptyStateProps {
-  message: string;
+export function EmptyState({ message }: { message: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-line-strong bg-paper px-6 py-12 text-center text-sm text-ink-soft">
+      {message}
+    </div>
+  );
 }
 
-export function EmptyState({ message }: EmptyStateProps) {
+/* small win-chance bar with a tick at the 54.25% break-even */
+export function WinBar({ prob }: { prob: number }) {
+  const pct = Math.min(prob * 100, 100);
   return (
-    <div className="rounded-xl border border-dashed border-white/10 bg-surface-raised/50 px-6 py-12 text-center text-sm text-text-muted">
-      {message}
+    <div className="relative h-1.5 w-full max-w-[88px] overflow-visible rounded-full bg-line">
+      <div
+        className={`h-full rounded-full ${prob >= 0.5425 ? "bg-bet" : "bg-skip"}`}
+        style={{ width: `${pct}%` }}
+      />
+      <span className="absolute -top-[3px] left-[54.25%] h-3 w-px bg-ink-faint" />
     </div>
   );
 }

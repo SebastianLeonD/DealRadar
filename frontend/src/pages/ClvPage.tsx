@@ -9,36 +9,39 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, type ClvResponse, type ClvRow } from "../lib/api";
+import { api, type ClvResponse, type ClvRow, type RecordSummary } from "../lib/api";
 import { Badge, EmptyState, formatDate, MetricCard, PageHeader } from "../components/ui";
 
-function edgeBadgeVariant(edgeType: string): "cyan" | "purple" {
-  return edgeType === "Line Discrepancy" ? "cyan" : "purple";
-}
+const GRID = "grid-cols-[1.4fr_1fr_0.8fr_0.8fr_0.8fr_1fr]";
 
-function ClvRowItem({ row }: { row: ClvRow }) {
-  const clvVariant =
-    row.clv > 0 ? "over" : row.clv < 0 ? "under" : "neutral";
-
+function MovementRow({ row }: { row: ClvRow }) {
+  const good = row.clv > 0;
+  const flat = row.clv === 0;
   return (
-    <div className="grid grid-cols-[1.2fr_1fr_0.7fr_0.7fr_0.7fr_0.7fr_0.7fr_0.7fr] items-center gap-4 rounded-xl border border-border bg-surface-card px-4 py-3.5">
-      <p className="font-semibold text-text">{row.player}</p>
-      <Badge variant={edgeBadgeVariant(row.edge_type)}>{row.edge_type}</Badge>
-      <Badge variant={row.play === "OVER" ? "over" : "under"}>{row.play}</Badge>
-      <Badge variant="orange">{row.original_line}</Badge>
-      <Badge variant="cyan">{row.dk_line_at_flag}</Badge>
-      <Badge variant="cyan">{row.dk_line_now}</Badge>
-      <Badge variant="purple">{row.movement}</Badge>
-      <Badge variant={clvVariant}>
+    <div className={`grid ${GRID} items-center gap-4 border-b border-line px-4 py-3.5 last:border-b-0`}>
+      <p className="truncate font-semibold text-ink">{row.player}</p>
+      <p className="text-sm text-ink-soft">
+        {row.play === "OVER" ? "Over" : "Under"}{" "}
+        <span className="tnum">{row.original_line}</span>
+      </p>
+      <p className="tnum text-sm text-ink-soft">{row.dk_line_at_flag}</p>
+      <p className="tnum text-sm text-ink-soft">{row.dk_line_now}</p>
+      <p className={`tnum text-sm font-semibold ${flat ? "text-ink-faint" : good ? "text-bet" : "text-skip"}`}>
         {row.clv > 0 ? "+" : ""}
         {row.clv}
-      </Badge>
+      </p>
+      <div>
+        <Badge variant={flat ? "neutral" : good ? "bet" : "skip"}>
+          {flat ? "No move" : good ? "Moved your way" : "Moved against you"}
+        </Badge>
+      </div>
     </div>
   );
 }
 
 export function ClvPage() {
   const [data, setData] = useState<ClvResponse | null>(null);
+  const [record, setRecord] = useState<RecordSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -61,92 +64,102 @@ export function ClvPage() {
 
   useEffect(() => {
     load();
+    api.getRecord().then(setRecord).catch(() => {});
   }, [load]);
 
   const chartData =
-    data?.daily.map((d) => ({
-      date: formatDate(d.date),
-      avg_clv: d.avg_clv,
-    })) ?? [];
+    data?.daily.map((d) => ({ date: formatDate(d.date), avg_clv: d.avg_clv })) ?? [];
 
   return (
     <div>
       <PageHeader
-        title="CLV Performance"
-        subtitle="Track Closing Line Value against DraftKings live movement."
+        title="Results"
+        subtitle="Two scoreboards: did your picks actually win, and did the betting market drift toward your number after you picked?"
         action={
           <button
             type="button"
             disabled={refreshing}
             onClick={() => load(true)}
-            className="inline-flex items-center gap-2 rounded-lg border border-accent/40 bg-accent/10 px-4 py-2 text-sm font-medium text-accent hover:bg-accent/15 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-md border border-line-strong bg-card px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-ink disabled:opacity-40"
           >
-            {refreshing ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <RefreshCw size={16} />
-            )}
-            Refresh CLV
+            {refreshing ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+            Refresh
           </button>
         }
       />
 
-      {data && !loading && (
-        <div className="mb-6 grid grid-cols-3 gap-3">
-          <MetricCard label="Unique Edges Monitored" value={data.summary.unique} />
-          <MetricCard
-            label="Positive CLV Rate"
-            value={`${data.summary.positive_rate}%`}
-          />
-          <MetricCard
-            label="Average CLV (pts)"
-            value={`${data.summary.avg_clv > 0 ? "+" : ""}${data.summary.avg_clv} pts`}
-          />
-        </div>
-      )}
+      <div className="rise rise-1 mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <MetricCard
+          label="Record"
+          value={
+            record?.settled
+              ? `${record.wins}–${record.losses}${record.pushes ? `–${record.pushes}` : ""}`
+              : "—"
+          }
+          hint="graded picks, counted once"
+        />
+        <MetricCard
+          label="Hit rate"
+          value={record?.hit_rate != null ? `${record.hit_rate}%` : "—"}
+          hint="break-even is 54.25%"
+        />
+        <MetricCard
+          label="Market agreed"
+          value={`${data?.summary.positive_rate ?? 0}%`}
+          hint="lines drifted your way"
+        />
+        <MetricCard
+          label="Avg drift"
+          value={`${(data?.summary.avg_clv ?? 0) > 0 ? "+" : ""}${data?.summary.avg_clv ?? 0}`}
+          hint="points, after you picked"
+        />
+      </div>
 
-      <div className="mb-6 rounded-xl border border-border bg-surface-card p-5">
-        <h3 className="mb-4 text-sm font-semibold text-text">
-          Average CLV (Last 7 Days)
-        </h3>
+      <div className="rise rise-2 mb-8 rounded-lg border border-line bg-card p-5">
+        <h3 className="mb-1 text-sm font-semibold text-ink">Line drift, last 7 days</h3>
+        <p className="mb-4 text-xs text-ink-faint">
+          Above zero = the bookmakers kept moving toward your picks after you found them. A
+          good long-term sign even on losing nights.
+        </p>
         {chartData.length === 0 ? (
-          <EmptyState message="No CLV history yet." />
+          <EmptyState message="No history yet — picks need a re-scrape after you find them." />
         ) : (
-          <ResponsiveContainer width="100%" height={220}>
+          <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={chartData}>
               <defs>
                 <linearGradient id="clvGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#00ff88" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#00ff88" stopOpacity={0} />
+                  <stop offset="0%" stopColor="#0c7a43" stopOpacity={0.18} />
+                  <stop offset="100%" stopColor="#0c7a43" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid stroke="rgba(255,255,255,0.04)" vertical={false} />
+              <CartesianGrid stroke="#e9e6de" vertical={false} />
               <XAxis
                 dataKey="date"
-                tick={{ fill: "#64748b", fontSize: 11 }}
+                tick={{ fill: "#9aa1a9", fontSize: 11 }}
                 axisLine={false}
                 tickLine={false}
               />
               <YAxis
-                tick={{ fill: "#64748b", fontSize: 11 }}
+                tick={{ fill: "#9aa1a9", fontSize: 11 }}
                 axisLine={false}
                 tickLine={false}
                 domain={["auto", "auto"]}
               />
               <Tooltip
                 contentStyle={{
-                  background: "#1a1a1a",
-                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "#ffffff",
+                  border: "1px solid #d8d4c8",
                   borderRadius: 8,
                   fontSize: 12,
+                  color: "#191b1f",
                 }}
-                labelStyle={{ color: "#94a3b8" }}
-                itemStyle={{ color: "#00ff88" }}
+                labelStyle={{ color: "#565d66" }}
+                itemStyle={{ color: "#0c7a43" }}
               />
               <Area
                 type="monotone"
                 dataKey="avg_clv"
-                stroke="#00ff88"
+                stroke="#0c7a43"
                 strokeWidth={2}
                 fill="url(#clvGradient)"
               />
@@ -155,29 +168,31 @@ export function ClvPage() {
         )}
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-border bg-surface-raised">
-        <div className="grid grid-cols-[1.2fr_1fr_0.7fr_0.7fr_0.7fr_0.7fr_0.7fr_0.7fr] gap-4 border-b border-border px-4 py-3 text-xs font-semibold uppercase tracking-widest text-text-dim">
+      <div className="rise rise-3 overflow-hidden rounded-lg border border-line bg-card">
+        <div
+          className={`grid ${GRID} gap-4 border-b-2 border-ink px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft`}
+        >
           <span>Player</span>
-          <span>Edge</span>
-          <span>Play</span>
-          <span>Orig PP</span>
-          <span>DK @ Flag</span>
-          <span>DK Now</span>
-          <span>Movement</span>
-          <span>CLV</span>
+          <span>Your pick</span>
+          <span>Books then</span>
+          <span>Books now</span>
+          <span>Drift</span>
+          <span>Verdict on the market</span>
         </div>
 
-        <div className="space-y-2 p-3">
-          {loading ? (
-            <EmptyState message="Loading CLV data..." />
-          ) : !data?.rows.length ? (
-            <EmptyState message="No CLV data yet. Log edges, re-scrape DK, then refresh." />
-          ) : (
-            data.rows.map((row, i) => (
-              <ClvRowItem key={`${row.pp_player_name}-${row.flagged_at}-${i}`} row={row} />
-            ))
-          )}
-        </div>
+        {loading ? (
+          <div className="p-4">
+            <EmptyState message="Loading..." />
+          </div>
+        ) : !data?.rows.length ? (
+          <div className="p-4">
+            <EmptyState message="Nothing tracked yet. Find picks first, then re-run step 1 later." />
+          </div>
+        ) : (
+          data.rows.map((row, i) => (
+            <MovementRow key={`${row.pp_player_name}-${row.flagged_at}-${i}`} row={row} />
+          ))
+        )}
       </div>
     </div>
   );

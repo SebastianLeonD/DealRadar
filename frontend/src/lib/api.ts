@@ -1,4 +1,4 @@
-export type Page = "execution" | "opportunities" | "clv";
+export type Page = "execution" | "opportunities" | "clv" | "help";
 
 export interface FeedStatus {
   status: "fresh" | "aging" | "stale";
