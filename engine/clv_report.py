@@ -5,8 +5,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from storage.db_manager import get_edges, get_latest_dk_line, ingest_staging
 
-TARGET_STAT = 'player_points'
-
 
 def calculate_clv(play: str, pp_line: float, closing_dk_line: float) -> float:
     if play == 'OVER':
@@ -23,7 +21,7 @@ def build_clv_rows(sync_staging: bool = True) -> list[dict]:
         except FileNotFoundError as error:
             print(f"Warning: {error}\n")
 
-    edges = get_edges(TARGET_STAT)
+    edges = get_edges()
     if not edges:
         print("No logged edges found. Run python3 engine/matcher.py first.")
         return []
@@ -32,7 +30,7 @@ def build_clv_rows(sync_staging: bool = True) -> list[dict]:
     for edge in edges:
         latest_dk = get_latest_dk_line(
             edge['dk_player_name'],
-            TARGET_STAT,
+            edge['stat_type'],
             reference_line=edge['dk_line_at_flag'],
         )
         closing_line = latest_dk['line'] if latest_dk else edge['dk_line_at_flag']
@@ -50,6 +48,7 @@ def build_clv_rows(sync_staging: bool = True) -> list[dict]:
             'dk_move': dk_move,
             'clv': clv,
             'edge_type': edge['edge_type'],
+            'stat_type': edge['stat_type'],
             'team': edge.get('team') or '',
         })
 

@@ -11,12 +11,18 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type ActionInfo, type FeedsResponse, type PipelineResult } from "../lib/api";
 import { Badge, PageHeader } from "../components/ui";
 
-type ActionKey = "fetch_sharp" | "parse_pp" | "run_matcher" | "run_full";
+type ActionKey =
+  | "fetch_sharp"
+  | "parse_pp"
+  | "run_matcher"
+  | "run_full"
+  | "settle_results";
 
 const ACTIONS: { key: ActionKey; label: string; primary?: boolean }[] = [
   { key: "fetch_sharp", label: "Fetch Sharp Lines" },
   { key: "parse_pp", label: "Parse PrizePicks" },
   { key: "run_matcher", label: "Run Edge Detection" },
+  { key: "settle_results", label: "Settle Results" },
   { key: "run_full", label: "Run Full Pipeline", primary: true },
 ];
 
@@ -131,6 +137,9 @@ export function ExecutionPage() {
           break;
         case "run_full":
           result = await api.runFull();
+          break;
+        case "settle_results":
+          result = await api.settleResults();
           break;
       }
       setLog(result.output);

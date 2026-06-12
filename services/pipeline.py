@@ -19,18 +19,19 @@ from storage.db_manager import get_connection, init_db, ingest_staging
 FRESHNESS_MINUTES = 5
 
 EDGE_DEDUPE_KEYS = ["player", "play", "pp_line", "dk_line", "edge_type", "stat_type"]
-CLV_DEDUPE_KEYS = ["pp_player_name", "play", "pp_line", "dk_line_at_flag", "edge_type"]
+CLV_DEDUPE_KEYS = ["pp_player_name", "play", "pp_line", "dk_line_at_flag", "edge_type", "stat_type"]
 
 ACTION_CATALOG = {
     "fetch_sharp": {
         "title": "Fetch Sharp Lines",
         "command": "python3 scrapers/draftkings_api.py",
         "description": (
-            "Calls The-Odds-API for today's NBA games, pulls DraftKings "
-            "`player_points` props, de-vigs American odds into true Over/Under "
-            "probabilities, and writes the flattened snapshot to JSON staging."
+            "Calls The-Odds-API for the active sport (ACTIVE_SPORT in .env: nba or "
+            "world_cup), pulls every configured player-prop market from DK/FD/MGM/Caesars, "
+            "de-vigs the prices, and writes the flattened snapshot to JSON staging. "
+            "Only games starting within the kickoff window are fetched."
         ),
-        "api_calls": "0 credits for event list + ~1 credit per game on the slate",
+        "api_calls": "0 credits for event list + ~1 credit per market per game",
         "writes_to": "data/processed/draftkings_data.json",
     },
     "parse_pp": {
@@ -78,6 +79,17 @@ ACTION_CATALOG = {
         ),
         "api_calls": "None (SQLite query only unless you re-scrape DK separately first)",
         "writes_to": "Read-only report (no file writes)",
+    },
+    "settle_results": {
+        "title": "Settle Results",
+        "command": "python3 engine/settlement.py",
+        "description": (
+            "Pulls finished-game box scores from ESPN (free, no key), grades every "
+            "logged edge as WIN/LOSS/PUSH, and prints your lifetime record plus the "
+            "model calibration gap (predicted win% vs actual hit rate)."
+        ),
+        "api_calls": "None billed — ESPN's public API is free",
+        "writes_to": "data/arb_engine.db → edges table (result, actual_value)",
     },
 }
 
@@ -166,7 +178,14 @@ def load_edges_dataframe(
             edge_type,
             probability_text,
             dk_over_prob,
-            dk_under_prob
+            dk_under_prob,
+            win_prob,
+            ev_percent,
+            verdict,
+            flags,
+            book_count,
+            result,
+            actual_value
         FROM edges
         WHERE 1 = 1
     """
@@ -185,7 +204,14 @@ def load_edges_dataframe(
     with get_connection() as connection:
         frame = pd.read_sql_query(query, connection, params=params)
 
-    return dedupe_edges(frame, EDGE_DEDUPE_KEYS)
+    frame = dedupe_edges(frame, EDGE_DEDUPE_KEYS)
+    if not frame.empty:
+        frame = frame.sort_values(
+            ["win_prob", "flagged_at"], ascending=[False, False], na_position="last"
+        ).reset_index(drop=True)
+        # NaN is invalid JSON; old rows predate the verdict columns.
+        frame = frame.astype(object).where(pd.notna(frame), None)
+    return frame
 
 
 def build_clv_dataframe(sync_staging: bool = False) -> pd.DataFrame:

@@ -23,10 +23,17 @@ export interface Edge {
   play: "OVER" | "UNDER";
   pp_line: number;
   dk_line: number;
-  edge_type: "Line Discrepancy" | "+EV Odds Juice";
+  edge_type: "Line Discrepancy" | "+EV Odds Juice" | "Duration Model" | string;
   probability_text: string;
   dk_over_prob: number;
   dk_under_prob: number;
+  win_prob: number | null;
+  ev_percent: number | null;
+  verdict: "YES" | "LEAN" | "NO" | null;
+  flags: string | null;
+  book_count: number | null;
+  result: "WIN" | "LOSS" | "PUSH" | null;
+  actual_value: number | null;
 }
 
 export interface EdgesResponse {
@@ -35,7 +42,19 @@ export interface EdgesResponse {
     unique: number;
     line_discrepancy: number;
     ev_juice: number;
+    yes_count: number;
+    stats: string[];
   };
+}
+
+export interface RecordSummary {
+  settled: number;
+  wins: number;
+  losses: number;
+  pushes: number;
+  hit_rate: number | null;
+  avg_predicted_prob: number | null;
+  by_verdict: Record<string, { wins: number; losses: number; pushes: number }>;
 }
 
 export interface ClvRow {
@@ -99,6 +118,9 @@ export const api = {
     request<PipelineResult>("/pipeline/run-matcher", { method: "POST" }),
   runFull: () =>
     request<PipelineResult>("/pipeline/full", { method: "POST" }),
+  settleResults: () =>
+    request<PipelineResult>("/pipeline/settle", { method: "POST" }),
+  getRecord: () => request<RecordSummary>("/record"),
   getEdges: (stat: string, edgeType: string) =>
     request<EdgesResponse>(
       `/edges?stat=${encodeURIComponent(stat)}&edge_type=${encodeURIComponent(edgeType)}`,

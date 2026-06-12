@@ -12,7 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from engine.matcher import find_edges
-from storage.db_manager import DB_PATH, ingest_staging
+from storage.db_manager import DB_PATH, get_record_summary, ingest_staging
 from services.pipeline import (
     ACTION_CATALOG,
     build_clv_dataframe,
@@ -102,17 +102,38 @@ def pipeline_full():
     return {"success": success, "output": output}
 
 
+@app.post("/api/pipeline/settle")
+def pipeline_settle():
+    success, output = run_script("engine/settlement.py")
+    return {"success": success, "output": output or "Settlement complete."}
+
+
+@app.get("/api/record")
+def get_record():
+    return get_record_summary()
+
+
 @app.get("/api/edges")
 def get_edges(
     stat: str = Query("All"),
     edge_type: str = Query("All"),
 ):
     frame = load_edges_dataframe(stat, edge_type)
+    all_stats = load_edges_dataframe("All", "All")
+    stats = sorted(all_stats["stat_type"].dropna().unique()) if not all_stats.empty else []
+
     if frame.empty:
-        return {"edges": [], "summary": {"unique": 0, "line_discrepancy": 0, "ev_juice": 0}}
+        return {
+            "edges": [],
+            "summary": {
+                "unique": 0, "line_discrepancy": 0, "ev_juice": 0, "yes_count": 0,
+                "stats": stats,
+            },
+        }
 
     line_count = int((frame["edge_type"] == "Line Discrepancy").sum())
     ev_count = int((frame["edge_type"] == "+EV Odds Juice").sum())
+    yes_count = int((frame["verdict"] == "YES").sum())
 
     return {
         "edges": frame.to_dict(orient="records"),
@@ -120,6 +141,8 @@ def get_edges(
             "unique": len(frame),
             "line_discrepancy": line_count,
             "ev_juice": ev_count,
+            "yes_count": yes_count,
+            "stats": stats,
         },
     }
 
