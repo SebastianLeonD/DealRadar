@@ -114,7 +114,10 @@ class AnalyzeRequest(BaseModel):
 
     player: str | None = None
     pp_player_name: str | None = None
+    dk_player_name: str | None = None
     team: str | None = None
+    opponent: str | None = None
+    game: str | None = None
     stat_type: str | None = None
     play: str | None = None
     pp_line: float | None = None
@@ -125,19 +128,50 @@ class AnalyzeRequest(BaseModel):
     win_prob: float | None = None
     ev_percent: float | None = None
     book_count: int | None = None
+    commence_time: str | None = None
     flags: str | None = None
+
+
+def _with_matchup(edge: dict) -> dict:
+    """Fill in the opponent/game so the analyst always knows the matchup."""
+    from engine.ai_analyst import opponent_from_game
+    from storage.db_manager import get_player_game_map
+
+    if not edge.get("game"):
+        player = edge.get("dk_player_name") or edge.get("player")
+        edge["game"] = get_player_game_map().get(player, "")
+    if not edge.get("opponent"):
+        edge["opponent"] = opponent_from_game(edge.get("game"), edge.get("team"))
+    return edge
+
+
+@app.post("/api/edges/prompt")
+def preview_prompt(req: AnalyzeRequest):
+    """Show exactly what would be sent to Claude — no model call, no billing."""
+    from engine.ai_analyst import describe_request
+
+    edge = _with_matchup(req.model_dump())
+    return {"ok": True, "opponent": edge.get("opponent"), "sent": describe_request(edge)}
 
 
 @app.post("/api/edges/analyze")
 def analyze_edge(req: AnalyzeRequest):
     """Second-opinion OVER/UNDER/PASS call from Claude (your subscription)."""
-    from engine.ai_analyst import analyze_play
+    from engine.ai_analyst import analyze_play, describe_request
+
+    edge = _with_matchup(req.model_dump())
+    sent = describe_request(edge)
 
     try:
-        recommendation = analyze_play(req.model_dump())
-        return {"ok": True, "recommendation": recommendation}
+        recommendation = analyze_play(edge)
+        return {
+            "ok": True,
+            "recommendation": recommendation,
+            "opponent": edge.get("opponent"),
+            "sent": sent,
+        }
     except Exception as error:  # surface a clean message to the UI
-        return {"ok": False, "error": str(error)}
+        return {"ok": False, "error": str(error), "opponent": edge.get("opponent"), "sent": sent}
 
 
 @app.get("/api/record")

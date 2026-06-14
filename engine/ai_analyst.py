@@ -38,6 +38,14 @@ SYSTEM_PROMPT = (
     "is the strongest signal.\n"
     "- EV is measured against the 54.25% PrizePicks flex break-even. A play only "
     "makes sense if the win probability clears that and EV is positive.\n"
+    "- WEIGH THE MATCHUP. The context names the opponent. Use it together with "
+    "your own knowledge of both teams and the player: how strong is the opponent "
+    "and their defense (for a goalkeeper, the opponent's attack instead), is the "
+    "player's side likely to dominate and create chances or sit back and chase the "
+    "game, and is this player a primary attacking option or a peripheral one? A "
+    "favourable line against a weak opponent the player's team should control is "
+    "more trustworthy; a tempting line against an elite defense deserves scepticism. "
+    "Name the specific opponent in your reasoning when it drives the call.\n"
     "- TAKE THE TRAP FLAGS SERIOUSLY. They catch the classic PrizePicks failure "
     "mode: a 'great' line gap that is really the sharp books pricing in news PP "
     "hasn't reacted to (injuries, stale board, books disagreeing). If a serious "
@@ -73,6 +81,23 @@ def _stat_label(stat: str | None) -> str:
     return stat.replace("player_", "").replace("_", " ")
 
 
+def opponent_from_game(game: str | None, team: str | None) -> str:
+    """Pick the opponent out of a 'Away @ Home' game string given the player's
+    team. Tolerant of loose name matches; returns '' when it can't tell."""
+    if not isinstance(game, str) or "@" not in game:
+        return ""
+    away, _, home = game.partition("@")
+    away, home = away.strip(), home.strip()
+    if not isinstance(team, str) or not team.strip():
+        return ""
+    t = team.strip().lower()
+    if t and (t in home.lower() or home.lower() in t):
+        return away
+    if t and (t in away.lower() or away.lower() in t):
+        return home
+    return ""
+
+
 def build_context(edge: dict) -> dict:
     """Normalise a frontend/DB edge row into the analyst's context. Pure."""
     pp_line = _num(edge.get("pp_line"))
@@ -89,9 +114,15 @@ def build_context(edge: dict) -> dict:
     else:
         flag_list = []
 
+    team = edge.get("team") or ""
+    game = edge.get("game") or ""
+    opponent = edge.get("opponent") or opponent_from_game(game, team)
+
     return {
         "player": edge.get("player") or edge.get("pp_player_name"),
-        "team": edge.get("team") or "",
+        "team": team,
+        "opponent": opponent,
+        "matchup": game,
         "stat_type": _stat_label(edge.get("stat_type")),
         "prizepicks_line": pp_line,
         "engine_favoured_side": edge.get("play"),
@@ -107,8 +138,18 @@ def build_context(edge: dict) -> dict:
 
 
 def format_prompt(ctx: dict) -> str:
+    opponent = ctx.get("opponent")
+    matchup = ctx.get("matchup")
+    if opponent:
+        matchup_line = f"Matchup: {ctx.get('team') or 'player'} vs {opponent}"
+    elif matchup:
+        matchup_line = f"Matchup: {matchup}"
+    else:
+        matchup_line = "Matchup: opponent unknown — reason from the numbers only"
+
     lines = [
         f"Player: {ctx.get('player')} ({ctx.get('team') or 'team n/a'})",
+        matchup_line,
         f"Market: {ctx.get('stat_type')}",
         f"PrizePicks line: {ctx.get('prizepicks_line')}",
         f"Engine's favoured side: {ctx.get('engine_favoured_side')}  "
@@ -135,6 +176,21 @@ def format_prompt(ctx: dict) -> str:
         "agrees_with_engine to whether your pick matches the engine's favoured side."
     )
     return "\n".join(lines)
+
+
+def describe_request(edge: dict) -> dict:
+    """Exactly what gets handed to Claude, for UI transparency. No model call.
+
+    Returns the structured context the engine extracted, the rendered user
+    prompt, the system instructions, and the required response shape.
+    """
+    ctx = build_context(edge)
+    return {
+        "context": ctx,
+        "prompt": format_prompt(ctx),
+        "system": SYSTEM_PROMPT,
+        "response_format": _JSON_INSTRUCTION,
+    }
 
 
 def _pct(value):

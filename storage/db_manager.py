@@ -486,6 +486,28 @@ def get_record_summary(db_path: Path = DB_PATH) -> dict:
     return summary
 
 
+def get_player_game_map(db_path: Path = DB_PATH) -> dict[str, str]:
+    """player_name -> bookmaker 'Game' string (e.g. 'Japan @ Netherlands').
+
+    Pulled from the sharp (DK) props, newest scrape wins. Used to tell the AI
+    analyst who each player is up against so it can reason about the matchup.
+    """
+    init_db(db_path)
+
+    with get_connection(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT player_name, game
+            FROM props
+            WHERE source = 'DK' AND game IS NOT NULL AND game != ''
+            ORDER BY captured_at ASC
+            """
+        ).fetchall()
+
+    # Later (newer) rows overwrite earlier ones for the same player.
+    return {row['player_name']: row['game'] for row in rows}
+
+
 def get_latest_dk_line(
     player_name: str,
     stat_type: str = 'player_points',

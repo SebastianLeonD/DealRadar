@@ -12,9 +12,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from engine.ai_analyst import opponent_from_game
 from engine.clv_report import build_clv_rows
 from engine.matcher import find_edges
-from storage.db_manager import get_connection, init_db, ingest_staging
+from storage.db_manager import get_connection, get_player_game_map, init_db, ingest_staging
 
 FRESHNESS_MINUTES = 5
 
@@ -162,6 +163,7 @@ def format_status_label(source: str) -> tuple[str, str]:
 def load_edges_dataframe(
     stat_type: str = "All",
     edge_type: str = "All",
+    active_only: bool = True,
 ) -> pd.DataFrame:
     init_db()
     query = """
@@ -184,6 +186,7 @@ def load_edges_dataframe(
             verdict,
             flags,
             book_count,
+            commence_time,
             result,
             actual_value
         FROM edges
@@ -205,12 +208,37 @@ def load_edges_dataframe(
         frame = pd.read_sql_query(query, connection, params=params)
 
     frame = dedupe_edges(frame, EDGE_DEDUPE_KEYS)
-    if not frame.empty:
-        frame = frame.sort_values(
-            ["win_prob", "flagged_at"], ascending=[False, False], na_position="last"
-        ).reset_index(drop=True)
-        # NaN is invalid JSON; old rows predate the verdict columns.
-        frame = frame.astype(object).where(pd.notna(frame), None)
+    if frame.empty:
+        return frame
+
+    if active_only:
+        # "Today's picks" = unsettled plays whose game kicks off today (local
+        # calendar day). Settled results, other days, and rows with no start
+        # time all drop off.
+        local_tz = datetime.now().astimezone().tzinfo
+        kickoff = pd.to_datetime(
+            frame["commence_time"], utc=True, errors="coerce"
+        ).dt.tz_convert(local_tz)
+        today = pd.Timestamp.now(tz=local_tz).date()
+        frame = frame[
+            frame["result"].isna()
+            & kickoff.notna()
+            & (kickoff.dt.date == today)
+        ]
+        if frame.empty:
+            return frame.reset_index(drop=True)
+
+    frame = frame.sort_values(
+        ["win_prob", "flagged_at"], ascending=[False, False], na_position="last"
+    ).reset_index(drop=True)
+    # Attach the matchup so the UI can show it and the AI can reason on it.
+    game_map = get_player_game_map()
+    frame["game"] = frame["dk_player_name"].map(game_map).fillna("")
+    frame["opponent"] = frame.apply(
+        lambda row: opponent_from_game(row["game"], row["team"]), axis=1
+    )
+    # NaN is invalid JSON; old rows predate the verdict columns.
+    frame = frame.astype(object).where(pd.notna(frame), None)
     return frame
 
 

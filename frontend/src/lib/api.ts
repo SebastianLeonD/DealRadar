@@ -19,6 +19,9 @@ export interface Edge {
   player: string;
   dk_player_name: string;
   team: string;
+  opponent?: string | null;
+  game?: string | null;
+  commence_time?: string | null;
   stat_type: string;
   play: "OVER" | "UNDER";
   pp_line: number;
@@ -97,10 +100,25 @@ export interface AiRecommendation {
   key_factors: string[];
 }
 
+export interface SentToAi {
+  context: Record<string, unknown>;
+  prompt: string;
+  system: string;
+  response_format: string;
+}
+
 export interface AnalyzeResponse {
   ok: boolean;
   recommendation?: AiRecommendation;
+  opponent?: string | null;
+  sent?: SentToAi;
   error?: string;
+}
+
+export interface PromptResponse {
+  ok: boolean;
+  opponent?: string | null;
+  sent: SentToAi;
 }
 
 export interface ActionInfo {
@@ -139,6 +157,12 @@ export const api = {
     request<EdgesResponse>(
       `/edges?stat=${encodeURIComponent(stat)}&edge_type=${encodeURIComponent(edgeType)}`,
     ),
+  previewPrompt: (edge: Edge) =>
+    request<PromptResponse>("/edges/prompt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(edge),
+    }),
   analyzeEdge: (edge: Edge) =>
     request<AnalyzeResponse>("/edges/analyze", {
       method: "POST",

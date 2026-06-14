@@ -1,4 +1,4 @@
-import { AlertTriangle, Download, Sparkles } from "lucide-react";
+import { AlertTriangle, ChevronDown, Download, Eye, Loader2, Sparkles, Swords } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   api,
@@ -6,11 +6,11 @@ import {
   type Edge,
   type EdgesResponse,
   type RecordSummary,
+  type SentToAi,
 } from "../lib/api";
 import {
   Badge,
   EmptyState,
-  formatTime,
   MetricCard,
   PageHeader,
   statLabel,
@@ -25,66 +25,96 @@ function verdictVariant(verdict: Edge["verdict"]): "bet" | "maybe" | "skip" | "n
   return "neutral";
 }
 
-const GRID = "grid-cols-[1.5fr_1.6fr_0.9fr_1.1fr_0.8fr_0.7fr]";
+type AiEntry = {
+  status: "loading" | "done" | "error";
+  rec?: AiRecommendation;
+  error?: string;
+  opponent?: string | null;
+};
 
-function AiPanel({ edge }: { edge: Edge }) {
+function isStrong(edge: Edge): boolean {
+  return edge.verdict === "YES" || edge.verdict === "LEAN";
+}
+
+type VerdictFilter = "All" | "YES" | "LEAN" | "NO";
+
+const VERDICT_FILTERS: { value: VerdictFilter; label: string }[] = [
+  { value: "All", label: "All" },
+  { value: "YES", label: "Yes" },
+  { value: "LEAN", label: "Maybe" },
+  { value: "NO", label: "No" },
+];
+
+function matchupLabel(edge: Edge): string | null {
+  if (edge.opponent) return `vs ${edge.opponent}`;
+  if (edge.game) return edge.game;
+  return null;
+}
+
+/* ---------- transparency: exactly what we send Claude ---------- */
+
+function PromptBox({ edge }: { edge: Edge }) {
+  const [open, setOpen] = useState(false);
+  const [sent, setSent] = useState<SentToAi | null>(null);
   const [loading, setLoading] = useState(false);
-  const [rec, setRec] = useState<AiRecommendation | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const ask = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await api.analyzeEdge(edge);
-      if (res.ok && res.recommendation) {
-        setRec(res.recommendation);
-      } else {
-        setError(res.error ?? "Analysis failed.");
+  const toggle = useCallback(async () => {
+    const next = !open;
+    setOpen(next);
+    if (next && !sent && !loading) {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await api.previewPrompt(edge);
+        if (res.ok) setSent(res.sent);
+        else setError("Couldn't load the prompt.");
+      } catch {
+        setError("Couldn't load the prompt.");
+      } finally {
+        setLoading(false);
       }
-    } catch {
-      setError("Could not reach the analyst.");
-    } finally {
-      setLoading(false);
     }
-  }, [edge]);
+  }, [open, sent, loading, edge]);
 
   return (
-    <div className="px-4 pb-3">
-      {!rec && (
-        <button
-          onClick={ask}
-          disabled={loading}
-          className="inline-flex items-center gap-1.5 rounded-md border border-line-strong bg-card px-2.5 py-1 text-xs font-semibold text-ink-soft transition-colors hover:border-ink hover:text-ink disabled:opacity-50"
-        >
-          <Sparkles size={12} />
-          {loading ? "Asking Claude…" : "Ask AI"}
-        </button>
-      )}
-      {error && (
-        <p className="mt-1 text-xs text-skip">
-          AI: {error}{" "}
-          <button onClick={ask} className="underline hover:text-ink">
-            retry
-          </button>
-        </p>
-      )}
-      {rec && (
-        <div className="rounded-md border border-line bg-paper px-3 py-2.5">
-          <div className="mb-1.5 flex flex-wrap items-center gap-2">
-            <Badge variant={rec.pick === "PASS" ? "skip" : "bet"}>{rec.pick}</Badge>
-            <span className="tnum text-xs text-ink-faint">{rec.confidence}% confidence</span>
-            <Badge variant={rec.agrees_with_engine ? "info" : "maybe"}>
-              {rec.agrees_with_engine ? "agrees with engine" : "differs from engine"}
-            </Badge>
-          </div>
-          <p className="text-sm text-ink-soft">{rec.reasoning}</p>
-          {rec.key_factors.length > 0 && (
-            <ul className="mt-1.5 list-disc pl-4 text-xs text-ink-faint">
-              {rec.key_factors.map((factor, i) => (
-                <li key={i}>{factor}</li>
-              ))}
-            </ul>
+    <div className="mt-2">
+      <button
+        onClick={toggle}
+        className="inline-flex items-center gap-1.5 text-xs font-medium text-ink-faint hover:text-ink"
+      >
+        <Eye size={12} />
+        What Claude sees
+        <ChevronDown size={12} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="mt-2 space-y-3">
+          {loading && (
+            <p className="flex items-center gap-2 text-xs text-ink-faint">
+              <Loader2 size={12} className="animate-spin" /> Loading…
+            </p>
+          )}
+          {error && <p className="text-xs text-skip">{error}</p>}
+          {sent && (
+            <>
+              <div>
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-faint">
+                  This play (the facts we hand it)
+                </p>
+                <pre className="max-h-60 overflow-auto whitespace-pre-wrap rounded-md border border-line bg-card px-3 py-2 text-[11px] leading-relaxed text-ink-soft">
+                  {sent.prompt}
+                </pre>
+              </div>
+              <div>
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-faint">
+                  Its instructions (how we ask it to think)
+                </p>
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-line bg-card px-3 py-2 text-[11px] leading-relaxed text-ink-faint">
+                  {sent.system}
+                </pre>
+              </div>
+            </>
           )}
         </div>
       )}
@@ -92,89 +122,304 @@ function AiPanel({ edge }: { edge: Edge }) {
   );
 }
 
-function PickRow({ edge }: { edge: Edge }) {
+/* ---------- the AI verdict, shown in full ---------- */
+
+function AiVerdict({ rec }: { rec: AiRecommendation }) {
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <Badge variant={rec.pick === "PASS" ? "skip" : "bet"}>AI: {rec.pick}</Badge>
+        <span className="tnum text-xs text-ink-faint">{rec.confidence}% confident</span>
+        <Badge variant={rec.agrees_with_engine ? "info" : "maybe"}>
+          {rec.agrees_with_engine ? "agrees with engine" : "differs from engine"}
+        </Badge>
+      </div>
+      <p className="text-sm leading-relaxed text-ink-soft">{rec.reasoning}</p>
+      {rec.key_factors.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {rec.key_factors.map((factor, i) => (
+            <li key={i} className="flex gap-2 text-xs text-ink-faint">
+              <span>•</span>
+              <span>{factor}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** The AI block: nothing runs until the user asks. */
+function AiResult({
+  edge,
+  entry,
+  onAnalyze,
+}: {
+  edge: Edge;
+  entry: AiEntry | undefined;
+  onAnalyze: (edge: Edge) => void;
+}) {
+  if (!entry) {
+    return (
+      <button
+        onClick={() => onAnalyze(edge)}
+        className="inline-flex items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-ink hover:text-ink"
+      >
+        <Sparkles size={13} />
+        Ask Claude
+      </button>
+    );
+  }
+  if (entry.status === "loading") {
+    return (
+      <div className="flex items-center gap-2 text-sm text-ink-faint">
+        <Loader2 size={14} className="animate-spin" />
+        {edge.opponent ? `Reading the matchup vs ${edge.opponent}…` : "Asking Claude…"}
+      </div>
+    );
+  }
+  if (entry.status === "error") {
+    return (
+      <p className="text-sm text-skip">
+        {entry.error}{" "}
+        <button onClick={() => onAnalyze(edge)} className="underline hover:text-ink">
+          retry
+        </button>
+      </p>
+    );
+  }
+  return (
+    <div>
+      <AiVerdict rec={entry.rec!} />
+      <button
+        onClick={() => onAnalyze(edge)}
+        className="mt-2 text-[11px] text-ink-faint underline hover:text-ink"
+      >
+        re-analyze
+      </button>
+    </div>
+  );
+}
+
+/* ---------- featured card for a play the engine likes ---------- */
+
+function StrongPickCard({
+  edge,
+  entry,
+  onAnalyze,
+}: {
+  edge: Edge;
+  entry: AiEntry | undefined;
+  onAnalyze: (edge: Edge) => void;
+}) {
   const word = verdictWord(edge.verdict);
+  const matchup = matchupLabel(edge);
+
+  return (
+    <div className="rise flex flex-col overflow-hidden rounded-lg border border-line bg-card">
+      <div
+        className={`flex items-start justify-between gap-3 px-5 pt-4 ${
+          word === "YES" ? "border-l-2 border-bet" : "border-l-2 border-maybe"
+        }`}
+      >
+        <div className="min-w-0">
+          <p className="truncate text-lg font-semibold leading-tight text-ink">{edge.player}</p>
+          <p className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-faint">
+            <span className="truncate">{edge.team}</span>
+            {matchup && (
+              <>
+                <Swords size={11} className="shrink-0" />
+                <span className="truncate">{matchup}</span>
+              </>
+            )}
+          </p>
+        </div>
+        <Badge variant={verdictVariant(edge.verdict)}>{word}</Badge>
+      </div>
+
+      <div className="px-5 pt-3">
+        <p className="text-sm font-semibold text-ink">
+          {edge.play === "OVER" ? "Over" : "Under"}{" "}
+          <span className="tnum">{edge.pp_line}</span> {statLabel(edge.stat_type)}
+        </p>
+        <p className="mt-0.5 text-xs text-ink-faint">
+          books say <span className="tnum">{edge.dk_line}</span>
+          {edge.book_count ? ` · ${edge.book_count} book${edge.book_count > 1 ? "s" : ""}` : ""}
+        </p>
+      </div>
+
+      <div className="mt-3 flex items-center gap-5 px-5">
+        <div>
+          {edge.win_prob != null ? (
+            <>
+              <p className="tnum text-sm font-semibold text-ink">
+                {(edge.win_prob * 100).toFixed(1)}%
+              </p>
+              <WinBar prob={edge.win_prob} />
+            </>
+          ) : (
+            <p className="text-xs text-ink-faint">—</p>
+          )}
+          <p className="mt-1 text-[11px] uppercase tracking-wide text-ink-faint">win chance</p>
+        </div>
+        {edge.ev_percent != null && (
+          <div>
+            <p className="tnum text-sm font-semibold text-ink">
+              {edge.ev_percent >= 0 ? "+" : ""}
+              {edge.ev_percent.toFixed(1)}%
+            </p>
+            <p className="mt-1 text-[11px] uppercase tracking-wide text-ink-faint">edge</p>
+          </div>
+        )}
+      </div>
+
+      {edge.flags && (
+        <div className="mx-5 mt-3 flex items-start gap-2 rounded-md border border-maybe/25 bg-maybe-soft px-3 py-2">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-maybe" />
+          <p className="text-xs leading-relaxed text-maybe">{edge.flags}</p>
+        </div>
+      )}
+
+      <div className="mt-3 border-t border-line bg-paper px-5 py-4">
+        <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
+          <Sparkles size={12} />
+          Claude's read
+        </div>
+        <AiResult edge={edge} entry={entry} onAnalyze={onAnalyze} />
+        <PromptBox edge={edge} />
+      </div>
+    </div>
+  );
+}
+
+/* ---------- compact row for the full board ---------- */
+
+const GRID = "grid-cols-[1.8fr_1.7fr_1fr_1fr_0.7fr]";
+
+function BoardRow({
+  edge,
+  entry,
+  onAnalyze,
+}: {
+  edge: Edge;
+  entry: AiEntry | undefined;
+  onAnalyze: (edge: Edge) => void;
+}) {
+  const word = verdictWord(edge.verdict);
+  const [open, setOpen] = useState(false);
+
   return (
     <div
       className={`border-b border-line transition-colors last:border-b-0 hover:bg-paper ${
         word === "YES" ? "bg-bet-soft/30" : ""
       }`}
     >
-      <div className={`grid ${GRID} items-center gap-4 px-4 py-4`}>
-      {/* who */}
-      <div className="flex min-w-0 items-center gap-2">
-        <div className="min-w-0">
-          <p className="truncate font-semibold text-ink">{edge.player}</p>
-          <p className="truncate text-xs text-ink-faint">{edge.team}</p>
-        </div>
-        {edge.flags && (
-          <span title={edge.flags} className="shrink-0 cursor-help">
-            <AlertTriangle size={15} className="text-maybe" />
-          </span>
-        )}
-      </div>
-
-      {/* the bet, in words */}
-      <div>
-        <p className="text-sm font-semibold text-ink">
-          {edge.play === "OVER" ? "Over" : "Under"}{" "}
-          <span className="tnum">{edge.pp_line}</span> {statLabel(edge.stat_type)}
-        </p>
-        <p className="text-xs text-ink-faint">
-          books say <span className="tnum">{edge.dk_line}</span>
-          {edge.book_count ? ` · ${edge.book_count} book${edge.book_count > 1 ? "s" : ""}` : ""}
-        </p>
-      </div>
-
-      {/* win chance */}
-      <div>
-        {edge.win_prob != null ? (
-          <>
-            <p className="tnum text-sm font-semibold text-ink">
-              {(edge.win_prob * 100).toFixed(1)}%
+      <div className={`grid ${GRID} items-center gap-4 px-4 py-3.5`}>
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="min-w-0">
+            <p className="truncate font-semibold text-ink">{edge.player}</p>
+            <p className="truncate text-xs text-ink-faint">
+              {edge.team}
+              {edge.opponent ? ` · vs ${edge.opponent}` : ""}
             </p>
-            <WinBar prob={edge.win_prob} />
-          </>
-        ) : (
-          <p className="text-xs text-ink-faint">—</p>
-        )}
-      </div>
+          </div>
+          {edge.flags && (
+            <span title={edge.flags} className="shrink-0 cursor-help">
+              <AlertTriangle size={15} className="text-maybe" />
+            </span>
+          )}
+        </div>
 
-      {/* verdict */}
-      <div>
-        <Badge variant={verdictVariant(edge.verdict)}>{word}</Badge>
-        {edge.ev_percent != null && (
-          <p className="tnum mt-1 text-xs text-ink-faint">
-            edge {edge.ev_percent >= 0 ? "+" : ""}
-            {edge.ev_percent.toFixed(1)}%
+        <div>
+          <p className="text-sm font-semibold text-ink">
+            {edge.play === "OVER" ? "Over" : "Under"}{" "}
+            <span className="tnum">{edge.pp_line}</span> {statLabel(edge.stat_type)}
           </p>
-        )}
+          <p className="text-xs text-ink-faint">
+            books say <span className="tnum">{edge.dk_line}</span>
+            {edge.book_count ? ` · ${edge.book_count} book${edge.book_count > 1 ? "s" : ""}` : ""}
+          </p>
+        </div>
+
+        <div>
+          {edge.win_prob != null ? (
+            <>
+              <p className="tnum text-sm font-semibold text-ink">
+                {(edge.win_prob * 100).toFixed(1)}%
+              </p>
+              <WinBar prob={edge.win_prob} />
+            </>
+          ) : (
+            <p className="text-xs text-ink-faint">—</p>
+          )}
+        </div>
+
+        <div>
+          <Badge variant={verdictVariant(edge.verdict)}>{word}</Badge>
+          {edge.ev_percent != null && (
+            <p className="tnum mt-1 text-xs text-ink-faint">
+              edge {edge.ev_percent >= 0 ? "+" : ""}
+              {edge.ev_percent.toFixed(1)}%
+            </p>
+          )}
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            onClick={() => setOpen((v) => !v)}
+            className="inline-flex items-center gap-1 rounded-md border border-line-strong bg-card px-2 py-1 text-xs font-semibold text-ink-soft transition-colors hover:border-ink hover:text-ink"
+          >
+            {entry?.status === "loading" ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <Sparkles size={12} />
+            )}
+            {entry?.status === "done" ? entry.rec!.pick : "AI"}
+            <ChevronDown size={12} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+          </button>
+        </div>
       </div>
 
-      {/* result */}
-      <div>
-        {edge.result ? (
-          <Badge variant={edge.result === "WIN" ? "bet" : edge.result === "LOSS" ? "skip" : "neutral"}>
-            {edge.result === "WIN" ? "Won" : edge.result === "LOSS" ? "Lost" : "Push"}
-            {edge.actual_value != null ? ` · ${edge.actual_value}` : ""}
-          </Badge>
-        ) : (
-          <span className="text-xs text-ink-faint">not played yet</span>
-        )}
-      </div>
-
-        <p className="tnum text-right text-xs text-ink-faint">{formatTime(edge.flagged_at)}</p>
-      </div>
-      <AiPanel edge={edge} />
+      {open && (
+        <div className="border-t border-line bg-paper px-4 py-3">
+          <AiResult edge={edge} entry={entry} onAnalyze={onAnalyze} />
+          <PromptBox edge={edge} />
+        </div>
+      )}
     </div>
   );
 }
 
 export function OpportunitiesPage() {
   const [stat, setStat] = useState("All");
+  const [verdict, setVerdict] = useState<VerdictFilter>("All");
   const [data, setData] = useState<EdgesResponse | null>(null);
   const [record, setRecord] = useState<RecordSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [ai, setAi] = useState<Record<number, AiEntry>>({});
+
+  const analyze = useCallback(async (edge: Edge) => {
+    setAi((prev) => ({ ...prev, [edge.id]: { status: "loading" } }));
+    try {
+      const res = await api.analyzeEdge(edge);
+      if (res.ok && res.recommendation) {
+        setAi((prev) => ({
+          ...prev,
+          [edge.id]: { status: "done", rec: res.recommendation, opponent: res.opponent },
+        }));
+      } else {
+        setAi((prev) => ({
+          ...prev,
+          [edge.id]: { status: "error", error: res.error ?? "Analysis failed." },
+        }));
+      }
+    } catch {
+      setAi((prev) => ({
+        ...prev,
+        [edge.id]: { status: "error", error: "Could not reach the analyst." },
+      }));
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -198,11 +443,16 @@ export function OpportunitiesPage() {
     api.getRecord().then(setRecord).catch(() => {});
   }, []);
 
+  const allEdges = data?.edges ?? [];
+  const edges =
+    verdict === "All" ? allEdges : allEdges.filter((e) => e.verdict === verdict);
+  const strong = allEdges.filter(isStrong);
+
   return (
     <div>
       <PageHeader
         title="Today's Picks"
-        subtitle="Every PrizePicks line, priced against the bookmakers. YES means bet it. MAYBE means read the warning first."
+        subtitle="Upcoming PrizePicks lines, priced against the bookmakers. YES means bet it. MAYBE means read the warning first. Ask Claude on any pick for a matchup-aware second opinion."
         action={
           <a
             href={api.exportEdgesUrl(stat, "All")}
@@ -218,7 +468,7 @@ export function OpportunitiesPage() {
       {data && !loading && (
         <div className="rise rise-1 mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">
           <MetricCard label="Bet-worthy today" value={data.summary.yes_count} hint="verdict: YES" />
-          <MetricCard label="Picks found" value={data.summary.unique} hint="above break-even" />
+          <MetricCard label="Picks today" value={data.summary.unique} hint="upcoming, above break-even" />
           <MetricCard
             label="Lifetime record"
             value={
@@ -236,7 +486,26 @@ export function OpportunitiesPage() {
         </div>
       )}
 
-      <div className="rise rise-2 mb-4 flex items-center justify-between">
+      {!loading && strong.length > 0 && (
+        <section className="rise rise-2 mb-10">
+          <div className="mb-3 flex items-center gap-2">
+            <Sparkles size={16} className="text-ink" />
+            <h2 className="text-lg font-semibold text-ink" style={{ fontFamily: "var(--font-display)" }}>
+              Worth a look
+            </h2>
+            <span className="text-xs text-ink-faint">
+              {strong.length} pick{strong.length > 1 ? "s" : ""} the engine likes — ask Claude on the ones you care about
+            </span>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {strong.map((edge) => (
+              <StrongPickCard key={edge.id} edge={edge} entry={ai[edge.id]} onAnalyze={analyze} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="rise rise-3 mb-4 flex flex-wrap items-center gap-3">
         <select
           value={stat}
           onChange={(e) => setStat(e.target.value)}
@@ -249,9 +518,33 @@ export function OpportunitiesPage() {
             </option>
           ))}
         </select>
-        <p className="text-xs text-ink-faint">
-          Hover the <AlertTriangle size={11} className="inline text-maybe" /> icon to read a
-          pick's warning
+
+        <div className="inline-flex items-center rounded-md border border-line-strong bg-card p-0.5">
+          {VERDICT_FILTERS.map((f) => {
+            const active = verdict === f.value;
+            const count =
+              f.value === "All"
+                ? allEdges.length
+                : allEdges.filter((e) => e.verdict === f.value).length;
+            return (
+              <button
+                key={f.value}
+                onClick={() => setVerdict(f.value)}
+                className={`rounded px-3 py-1.5 text-sm font-semibold transition-colors ${
+                  active ? "bg-ink text-paper" : "text-ink-soft hover:text-ink"
+                }`}
+              >
+                {f.label}
+                <span className={`tnum ml-1.5 text-xs ${active ? "text-paper/70" : "text-ink-faint"}`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <p className="ml-auto text-xs text-ink-faint">
+          Tap <span className="font-semibold text-ink-soft">AI</span> on any row to ask Claude or see its prompt
         </p>
       </div>
 
@@ -263,26 +556,34 @@ export function OpportunitiesPage() {
           <span>The bet</span>
           <span>Win chance</span>
           <span>Verdict</span>
-          <span>Result</span>
-          <span className="text-right">Found</span>
+          <span className="text-right">Claude</span>
         </div>
 
         {loading ? (
           <div className="p-4">
             <EmptyState message="Loading picks..." />
           </div>
-        ) : !data?.edges.length ? (
+        ) : !edges.length ? (
           <div className="p-4">
-            <EmptyState message="No picks yet. Go to Update Data and run the pipeline." />
+            <EmptyState
+              message={
+                allEdges.length
+                  ? `No "${VERDICT_FILTERS.find((f) => f.value === verdict)?.label}" picks today.`
+                  : "No upcoming picks. Go to Update Data and run the pipeline."
+              }
+            />
           </div>
         ) : (
-          data.edges.map((edge) => <PickRow key={edge.id} edge={edge} />)
+          edges.map((edge) => (
+            <BoardRow key={edge.id} edge={edge} entry={ai[edge.id]} onAnalyze={analyze} />
+          ))
         )}
       </div>
 
       <p className="rise rise-4 mt-4 text-xs leading-relaxed text-ink-faint">
-        The small tick on each win-chance bar marks 54.25% — the break-even point. Picks below
-        it lose money long-term, so they never appear here.
+        The small tick on each win-chance bar marks 54.25% — the break-even point. Picks below it
+        lose money long-term, so they never appear here. Claude's read is an on-demand second
+        opinion that weighs the opponent and any warnings; it is not financial advice.
       </p>
     </div>
   );

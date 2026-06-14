@@ -9,6 +9,7 @@ from engine.ai_analyst import (
     build_context,
     extract_recommendation,
     format_prompt,
+    opponent_from_game,
 )
 
 
@@ -49,6 +50,26 @@ def test_format_prompt_includes_flags_and_numbers():
     assert "Kylian Mbappe" in prompt
     assert "Injury report: questionable" in prompt
     assert "OVER, UNDER, or PASS" in prompt
+
+
+def test_opponent_from_game_picks_other_side():
+    assert opponent_from_game("New Zealand @ Iran", "New Zealand") == "Iran"
+    assert opponent_from_game("Egypt @ Belgium", "Belgium") == "Egypt"
+
+
+def test_opponent_from_game_handles_bad_input():
+    assert opponent_from_game("", "Belgium") == ""
+    assert opponent_from_game(None, "Belgium") == ""
+    assert opponent_from_game("Egypt @ Belgium", None) == ""
+    assert opponent_from_game(float("nan"), float("nan")) == ""  # NaN rows from pandas
+
+
+def test_build_context_resolves_opponent_and_matchup():
+    ctx = build_context({**_edge(), "game": "Tunisia @ France"})
+    assert ctx["opponent"] == "Tunisia"
+    assert ctx["matchup"] == "Tunisia @ France"
+    prompt = format_prompt(ctx)
+    assert "Tunisia" in prompt and "Matchup" in prompt
 
 
 def test_extract_plain_and_fenced():

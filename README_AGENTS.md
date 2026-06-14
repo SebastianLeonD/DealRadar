@@ -303,19 +303,36 @@ anchored to DraftKings only (not the consensus) for consistency.
 
 ## AI Analyst (ships backlog #2)
 
-Each pick on the Opportunities page has an **Ask AI** button. It sends the play's
-full context — the sharp-consensus win probability, EV over break-even, the
-anchor line vs the PrizePicks line, book count, and every trap flag — to Claude,
-which returns an independent **OVER / UNDER / PASS** call with confidence,
-reasoning, and key factors. It's a second opinion that reads the warnings: a
-serious trap flag pushes it toward PASS even when the math looks good, and it
-shows whether it **agrees with or differs from** the engine's verdict.
+On the Opportunities page, the plays the engine likes (**YES / MAYBE**) are
+surfaced as cards and every row has an **Ask Claude** button — nothing calls the
+model until you click, so you choose which plays to spend a call on. Claude gets
+the play's full context — the sharp-consensus win probability, EV over
+break-even, the anchor line vs the PrizePicks line, book count, every trap flag,
+**and the matchup (the opponent, derived from the sharp board's game string)** —
+and returns an independent **OVER / UNDER / PASS** call with confidence,
+reasoning, and key factors. It's a second opinion that reads the warnings *and
+weighs the opponent*: it reasons about how strong the other side is and whether
+the player's team should control the game, a serious trap flag pushes it toward
+PASS even when the math looks good, and it shows whether it **agrees with or
+differs from** the engine's verdict.
+
+Every pick also has a **"What Claude sees"** toggle that shows the exact prompt
+(the play's facts) and the system instructions — no model call, full
+transparency into what's being asked and how.
+
+The board itself only lists **today's upcoming, unsettled plays**: settled
+results and games that have already kicked off drop off automatically (your
+lifetime record still counts them).
 
 - **Runs on your Claude subscription.** `engine/ai_analyst.py` shells out to the
   logged-in `claude` CLI by default (`AI_BACKEND=auto`/`cli`) — no metered API
   key. Set `AI_BACKEND=sdk` + `ANTHROPIC_API_KEY` to use the metered API instead.
-- **Endpoint:** `POST /api/edges/analyze` (takes an edge row, returns the verdict).
-- **Tests:** `pip install pytest && python3 -m pytest tests/` (AI analyst + Kelly).
+- **Endpoints:** `POST /api/edges/analyze` (takes an edge row, fills in the
+  opponent if missing, returns the verdict + the opponent + the exact prompt
+  `sent`). `POST /api/edges/prompt` returns just that `sent` payload with **no
+  model call** — used by the "What Claude sees" toggle.
+- **Tests:** `pip install -r requirements-dev.txt && python3 -m pytest tests/`
+  (AI analyst + matchup + Kelly).
 
 **Kelly stake sizing:** slip suggestions now also carry a fractional-Kelly stake
 (`kelly_pct`) — the matcher tells you not just *which* slip but *how much* of
