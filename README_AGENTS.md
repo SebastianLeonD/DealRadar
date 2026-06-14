@@ -37,6 +37,35 @@ To trade more soccer stats (goals, saves, passes), extend the `world_cup`
 entry in `engine/sports.py` — the PP parser prints any stat types it skipped
 so you can see exactly what's on the board.
 
+### Model-based pricing (stats no book posts)
+
+Books only price soccer **shots, shots on target, goals, and assists**.
+PrizePicks posts many more (saves, fouls, tackles, crosses, offsides), so for
+those there is no market line to compare against. Instead the engine builds its
+own projection from each player's **World Cup form**:
+
+- `scrapers/fbref_stats.py` pulls every WC player's tournament stats from FBref
+  via **soccerdata** (clears Cloudflare with undetected-chromedriver, caches
+  locally). Writes `data/processed/fbref_wc_stats.json`.
+- `engine/projections.py` maps a PP stat to its FBref field, projects the
+  expected count next match as `total / matches played`, and runs it through the
+  same push-adjusted Poisson the book path uses.
+- `engine/matcher.py:price_model_edges` logs these as `edge_type='Form Model'`.
+
+Caveats, by design:
+- These plays are **always flagged** ("no betting market"), so they **cap at
+  MAYBE** (LEAN). One-game samples add a second small-sample flag.
+- A player needs **≥1 WC match played** to be modeled — opening-match teams
+  produce no modeled plays until they kick off.
+- FBref's World Cup feed is the simplified Opta box score, so **passes,
+  dribbles, key passes, and clearances are NOT available** for the tournament
+  (they exist only in domestic-league data).
+- These stats have no ESPN settlement mapping yet, so modeled edges stay
+  ungraded until that's added.
+
+Run it from the **Update Data** page ("Update World Cup form") or
+`python3 scrapers/fbref_stats.py`. Re-run after each matchday.
+
 ---
 
 ## What This Project Does
@@ -100,11 +129,13 @@ Prizepicks/
 ├── scrapers/
 │   ├── draftkings_api.py         # Multi-book sharp lines + alternates (Odds-API)
 │   ├── prizepicks_api.py         # Parses pasted PP raw JSON into flat format
+│   ├── fbref_stats.py            # World Cup player form from FBref (model pricing)
 │   ├── injuries_api.py           # ESPN injury report (free, cached 30 min)
 │   └── results_api.py            # ESPN box scores (free)
 ├── engine/
 │   ├── sports.py                 # Per-sport config (NBA / World Cup): markets, model, settlement
 │   ├── probability.py            # De-vig, ladder interpolation, EV, slips
+│   ├── projections.py            # Form-based pricing for stats no book posts
 │   ├── matcher.py                # Verdict engine: prices PP lines, flags traps
 │   ├── settlement.py             # Grades edges vs box scores, record report
 │   ├── clv_report.py             # CLV report from logged edges

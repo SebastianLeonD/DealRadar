@@ -46,6 +46,19 @@ ACTION_CATALOG = {
         "api_calls": "None (local file parse only)",
         "writes_to": "data/processed/live.json",
     },
+    "fetch_form": {
+        "title": "Update World Cup Form",
+        "command": "python3 scrapers/fbref_stats.py",
+        "description": (
+            "Scrapes each World Cup player's tournament stats from FBref (via "
+            "soccerdata, which clears Cloudflare) to price PrizePicks stats no "
+            "sportsbook posts — saves, fouls, fouls drawn, tackles, crosses, "
+            "offsides. Cached locally; only new matches trigger a fetch. These "
+            "plays are modeled (not market-verified), so they cap at MAYBE."
+        ),
+        "api_calls": "None billed — FBref is free (web scrape)",
+        "writes_to": "data/processed/fbref_wc_stats.json",
+    },
     "run_matcher": {
         "title": "Run Edge Detection",
         "command": "python3 engine/matcher.py",

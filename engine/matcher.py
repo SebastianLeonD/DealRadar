@@ -28,9 +28,16 @@ from engine.probability import (
     poisson_p_over_push_adjusted,
     prob_over_at_line,
 )
+from engine.projections import load_fbref_stats, model_stat_types, project_prop
 from engine.sports import get_sport
 from scrapers.injuries_api import get_injury_map, injury_status, is_risky_status
-from storage.db_manager import get_latest_props, get_sharp_ladders, ingest_staging, log_edges
+from storage.db_manager import (
+    get_game_commence_map,
+    get_latest_props,
+    get_sharp_ladders,
+    ingest_staging,
+    log_edges,
+)
 
 STALE_GAP_MINUTES = 45      # PP capture older than sharp capture by this much
 BOOK_DISAGREEMENT = 0.07    # max spread in P(over) between books
@@ -213,6 +220,94 @@ def evaluate_combo(
     return evaluation, ' + '.join(matched_legs), worst_score
 
 
+def _resolve_kickoff(team: str | None, games: list[dict]) -> tuple[str | None, str | None]:
+    """Find the DK game whose 'Away @ Home' string names this team."""
+    if not team:
+        return None, None
+    needle = team.strip().lower()
+    for game in games:
+        for side in game['game'].split('@'):
+            side = side.strip().lower()
+            if side and (side in needle or needle in side):
+                return game['commence_time'], game['game']
+    return None, None
+
+
+def price_model_edges(sport: dict, flagged_bets: list[dict]) -> bool:
+    """Price PP stats the books don't post against each player's World Cup form.
+
+    Appends qualifying plays to flagged_bets. Returns True if any model stat had
+    PP props to price (so the caller knows pricing happened).
+    """
+    model_stats = [s for s in model_stat_types() if s in sport['stat_models']]
+    players = load_fbref_stats() if model_stats else []
+    if not players:
+        return False
+
+    games = get_game_commence_map()
+    priced = False
+
+    for stat_type in model_stats:
+        pp_data = get_latest_props('PP', stat_type)
+        if not pp_data:
+            continue
+        priced = True
+        modeled = 0
+
+        for pp_player in pp_data:
+            pp_name = pp_player['player_name']
+            if ' + ' in pp_name:
+                continue  # combos not modeled for form-based stats yet
+            proj = project_prop(pp_name, stat_type, pp_player['line'], players)
+            if not proj or proj['win_prob'] < BREAKEVEN_PROB:
+                continue
+
+            kickoff, _ = _resolve_kickoff(pp_player.get('team') or proj.get('team'), games)
+            flagged_bets.append({
+                'Player': pp_name,
+                'DK_Player': proj['matched_name'],
+                'Match_Score': proj['match_score'],
+                'Team': pp_player['team'],
+                'Stat': stat_type,
+                'Play': proj['play'],
+                'PP_Line': pp_player['line'],
+                'DK_Line': proj['expected'],
+                'Probability': f"{proj['win_prob'] * 100:.1f}% true win",
+                'Edge_Type': 'Form Model',
+                'pp_player_name': pp_name,
+                'dk_player_name': proj['matched_name'],
+                'team': pp_player['team'],
+                'stat_type': stat_type,
+                'play': proj['play'],
+                'pp_line': pp_player['line'],
+                'dk_line_at_flag': proj['expected'],
+                'edge_type': 'Form Model',
+                'dk_over_prob': round(proj['win_prob'] * 100, 2)
+                if proj['play'] == 'OVER' else round((1 - proj['win_prob']) * 100, 2),
+                'dk_under_prob': round((1 - proj['win_prob']) * 100, 2)
+                if proj['play'] == 'OVER' else round(proj['win_prob'] * 100, 2),
+                'probability_text': (
+                    f"{proj['win_prob'] * 100:.1f}% true "
+                    f"(modeled from {proj['games']} game(s))"
+                ),
+                'win_prob': proj['win_prob'],
+                'ev_percent': proj['ev_percent'],
+                'verdict': proj['verdict'],
+                'flags': ' | '.join(proj['flags']) or None,
+                'book_count': None,
+                'commence_time': kickoff,
+                'pp_captured_at': pp_player.get('captured_at'),
+                'dk_captured_at': None,
+            })
+            modeled += 1
+
+        if modeled:
+            print(f"Modeled {modeled} {stat_type.replace('player_', '')} play(s) "
+                  "from World Cup form.")
+
+    return priced
+
+
 def find_edges(sync_staging: bool = True):
     if sync_staging:
         try:
@@ -320,6 +415,10 @@ def find_edges(sync_staging: bool = True):
                 'pp_captured_at': pp_player.get('captured_at'),
                 'dk_captured_at': evaluation['sharp_captured_at'],
             })
+
+    # --- Model-priced stats (no book market): project from World Cup form ---
+    if price_model_edges(sport, flagged_bets):
+        priced_any = True
 
     if not priced_any:
         print("Make sure both sharp and PP props exist in the database.")

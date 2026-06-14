@@ -146,6 +146,8 @@ export const api = {
     request<PipelineResult>("/pipeline/fetch-sharp", { method: "POST" }),
   parsePp: () =>
     request<PipelineResult>("/pipeline/parse-pp", { method: "POST" }),
+  fetchForm: () =>
+    request<PipelineResult>("/pipeline/fetch-form", { method: "POST" }),
   runMatcher: () =>
     request<PipelineResult>("/pipeline/run-matcher", { method: "POST" }),
   runFull: () =>

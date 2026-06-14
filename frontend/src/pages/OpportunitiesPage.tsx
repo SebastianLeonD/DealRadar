@@ -51,6 +51,27 @@ function matchupLabel(edge: Edge): string | null {
   return null;
 }
 
+function isModeled(edge: Edge): boolean {
+  return edge.edge_type === "Form Model";
+}
+
+/** "books say 1.5 · 3 books" for market plays, "our model · 5.0/game" for modeled. */
+function LineSource({ edge }: { edge: Edge }) {
+  if (isModeled(edge)) {
+    return (
+      <p className="mt-0.5 text-xs text-ink-faint">
+        our model · <span className="tnum">{edge.dk_line}</span>/game avg
+      </p>
+    );
+  }
+  return (
+    <p className="mt-0.5 text-xs text-ink-faint">
+      books say <span className="tnum">{edge.dk_line}</span>
+      {edge.book_count ? ` · ${edge.book_count} book${edge.book_count > 1 ? "s" : ""}` : ""}
+    </p>
+  );
+}
+
 /* ---------- transparency: exactly what we send Claude ---------- */
 
 function PromptBox({ edge }: { edge: Edge }) {
@@ -234,7 +255,10 @@ function StrongPickCard({
             )}
           </p>
         </div>
-        <Badge variant={verdictVariant(edge.verdict)}>{word}</Badge>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <Badge variant={verdictVariant(edge.verdict)}>{word}</Badge>
+          {isModeled(edge) && <Badge variant="info">modeled</Badge>}
+        </div>
       </div>
 
       <div className="px-5 pt-3">
@@ -242,10 +266,7 @@ function StrongPickCard({
           {edge.play === "OVER" ? "Over" : "Under"}{" "}
           <span className="tnum">{edge.pp_line}</span> {statLabel(edge.stat_type)}
         </p>
-        <p className="mt-0.5 text-xs text-ink-faint">
-          books say <span className="tnum">{edge.dk_line}</span>
-          {edge.book_count ? ` · ${edge.book_count} book${edge.book_count > 1 ? "s" : ""}` : ""}
-        </p>
+        <LineSource edge={edge} />
       </div>
 
       <div className="mt-3 flex items-center gap-5 px-5">
@@ -335,10 +356,7 @@ function BoardRow({
             {edge.play === "OVER" ? "Over" : "Under"}{" "}
             <span className="tnum">{edge.pp_line}</span> {statLabel(edge.stat_type)}
           </p>
-          <p className="text-xs text-ink-faint">
-            books say <span className="tnum">{edge.dk_line}</span>
-            {edge.book_count ? ` · ${edge.book_count} book${edge.book_count > 1 ? "s" : ""}` : ""}
-          </p>
+          <LineSource edge={edge} />
         </div>
 
         <div>
@@ -355,7 +373,10 @@ function BoardRow({
         </div>
 
         <div>
-          <Badge variant={verdictVariant(edge.verdict)}>{word}</Badge>
+          <div className="flex flex-wrap items-center gap-1">
+            <Badge variant={verdictVariant(edge.verdict)}>{word}</Badge>
+            {isModeled(edge) && <Badge variant="info">modeled</Badge>}
+          </div>
           {edge.ev_percent != null && (
             <p className="tnum mt-1 text-xs text-ink-faint">
               edge {edge.ev_percent >= 0 ? "+" : ""}

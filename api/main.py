@@ -103,6 +103,12 @@ def pipeline_full():
     return {"success": success, "output": output}
 
 
+@app.post("/api/pipeline/fetch-form")
+def pipeline_fetch_form():
+    success, output = run_script("scrapers/fbref_stats.py")
+    return {"success": success, "output": output or "World Cup form stats updated."}
+
+
 @app.post("/api/pipeline/settle")
 def pipeline_settle():
     success, output = run_script("engine/settlement.py")

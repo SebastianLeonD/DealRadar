@@ -508,6 +508,30 @@ def get_player_game_map(db_path: Path = DB_PATH) -> dict[str, str]:
     return {row['player_name']: row['game'] for row in rows}
 
 
+def get_game_commence_map(db_path: Path = DB_PATH) -> list[dict]:
+    """Distinct (game, commence_time) pairs from the sharp (DK) props.
+
+    Modeled edges (saves, fouls, etc.) have no book line, so they can't inherit
+    a kickoff from a matched book prop. Instead we resolve it from the player's
+    team: find the DK game whose 'Away @ Home' string names that team.
+    """
+    init_db(db_path)
+
+    with get_connection(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT game, commence_time, MAX(captured_at) AS captured_at
+            FROM props
+            WHERE source = 'DK' AND game IS NOT NULL AND game != ''
+              AND commence_time IS NOT NULL
+            GROUP BY game
+            ORDER BY captured_at ASC
+            """
+        ).fetchall()
+
+    return [{'game': row['game'], 'commence_time': row['commence_time']} for row in rows]
+
+
 def get_latest_dk_line(
     player_name: str,
     stat_type: str = 'player_points',
