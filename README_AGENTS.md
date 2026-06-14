@@ -103,10 +103,12 @@ Prizepicks/
 │   ├── injuries_api.py           # ESPN injury report (free, cached 30 min)
 │   └── results_api.py            # ESPN box scores (free)
 ├── engine/
+│   ├── sports.py                 # Per-sport config (NBA / World Cup): markets, model, settlement
 │   ├── probability.py            # De-vig, ladder interpolation, EV, slips
 │   ├── matcher.py                # Verdict engine: prices PP lines, flags traps
 │   ├── settlement.py             # Grades edges vs box scores, record report
 │   ├── clv_report.py             # CLV report from logged edges
+│   ├── ai_analyst.py             # Claude second-opinion OVER/UNDER/PASS call
 │   └── name_matcher.py           # Fuzzy player name matching
 ├── storage/
 │   └── db_manager.py             # SQLite: props ladders, edges, settlement
@@ -118,8 +120,8 @@ Prizepicks/
 ## First-Time Setup
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env          # then add your ODDS_API_KEY
 python3 storage/db_manager.py init

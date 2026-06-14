@@ -4,10 +4,13 @@ set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 API_PORT="${API_PORT:-8800}"
 
-if [ -f "$ROOT/venv/bin/activate" ]; then
-  # shellcheck source=/dev/null
-  source "$ROOT/venv/bin/activate"
-fi
+for venv_dir in .venv venv; do
+  if [ -f "$ROOT/$venv_dir/bin/activate" ]; then
+    # shellcheck source=/dev/null
+    source "$ROOT/$venv_dir/bin/activate"
+    break
+  fi
+done
 
 echo "Starting API on http://127.0.0.1:${API_PORT}"
 cd "$ROOT"
