@@ -66,6 +66,21 @@ Caveats, by design:
 Run it from the **Update Data** page ("Update World Cup form") or
 `python3 scrapers/fbref_stats.py`. Re-run after each matchday.
 
+### Team form as AI context (not edges)
+
+The same scraper also writes **team profiles** (`data/processed/fbref_wc_teams.json`):
+each team's attack (shots, SoT, goals/game), defense (goals conceded, shots on
+target faced, clean sheets), and style (fouls, crosses, tackles, offsides).
+
+`engine/team_profiles.py` resolves a play's team + opponent (with a name-alias
+map for FBref vs book naming) and `engine/ai_analyst.py` injects this into the
+Claude prompt as **"Tournament form so far."** This matters because Claude's
+training can't see the live tournament — feeding real form turns "is he in
+form / is that defense leaky?" from a guess into a data-grounded read. The
+prompt flags that samples are small early on, and these numbers are **context
+only — never used to generate an edge**. Visible in the "What Claude sees"
+toggle.
+
 ---
 
 ## What This Project Does
@@ -136,6 +151,7 @@ Prizepicks/
 │   ├── sports.py                 # Per-sport config (NBA / World Cup): markets, model, settlement
 │   ├── probability.py            # De-vig, ladder interpolation, EV, slips
 │   ├── projections.py            # Form-based pricing for stats no book posts
+│   ├── team_profiles.py          # Team attack/defense/style form -> AI context
 │   ├── matcher.py                # Verdict engine: prices PP lines, flags traps
 │   ├── settlement.py             # Grades edges vs box scores, record report
 │   ├── clv_report.py             # CLV report from logged edges

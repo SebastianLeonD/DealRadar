@@ -31,6 +31,7 @@ import soccerdata as sd
 from engine.sports import get_sport
 
 OUTPUT_FILE = Path("data/processed/fbref_wc_stats.json")
+TEAMS_FILE = Path("data/processed/fbref_wc_teams.json")
 LEAGUE = "INT-World Cup"
 SEASON = "2026"
 
@@ -54,6 +55,35 @@ TABLE_FIELDS = {
     },
     "keeper": {"Saves": "saves", "GA": "goals_allowed", "SoTA": "shots_on_target_against"},
 }
+
+# Team-level tables -> a per-team attack / defense / style profile. Same 5
+# summary tables FBref exposes for the tournament; used only as AI context
+# (never to manufacture an edge).
+TEAM_TABLE_FIELDS = {
+    "standard": {"MP": "games", "90s": "nineties"},
+    "shooting": {"Sh": "shots", "SoT": "shots_on_target", "Gls": "goals", "G/Sh": "goals_per_shot"},
+    "keeper": {
+        "GA": "goals_allowed",
+        "SoTA": "shots_on_target_against",
+        "Saves": "saves",
+        "CS": "clean_sheets",
+        "Save%": "save_pct",
+    },
+    "misc": {
+        "Fls": "fouls",
+        "Fld": "fouls_drawn",
+        "Off": "offsides",
+        "Crs": "crosses",
+        "TklW": "tackles",
+        "Int": "interceptions",
+    },
+}
+
+# Counting fields turned into per-game rates in the team profile.
+TEAM_PER_GAME = [
+    "shots", "shots_on_target", "goals", "goals_allowed", "shots_on_target_against",
+    "saves", "fouls", "fouls_drawn", "offsides", "crosses", "tackles", "interceptions",
+]
 
 
 def normalize(name: str) -> str:
@@ -87,6 +117,44 @@ def collect_players(fb: "sd.FBref") -> dict[tuple[str, str], dict]:
                     record[field] = None if value != value else float(value)  # NaN-safe
 
     return players
+
+
+def collect_teams(fb: "sd.FBref") -> list[dict]:
+    """Build one attack/defense/style profile per team from the season tables."""
+    teams: dict[str, dict] = {}
+
+    for table, fields in TEAM_TABLE_FIELDS.items():
+        frame = fb.read_team_season_stats(stat_type=table)
+        frame.columns = [_flatten(c) for c in frame.columns]
+        frame = frame.loc[:, ~frame.columns.duplicated()]
+        for index, row in frame.iterrows():
+            team = index[-1]  # (league, season, team)
+            record = teams.setdefault(team, {"team": team, "normalized": normalize(team)})
+            for source_col, field in fields.items():
+                if source_col in frame.columns:
+                    value = row[source_col]
+                    record[field] = None if value != value else float(value)
+
+    profiles = []
+    for record in teams.values():
+        nineties = record.get("nineties") or 0.0
+        if not nineties:
+            continue
+        per_game = {
+            field: round((record.get(field) or 0.0) / nineties, 2)
+            for field in TEAM_PER_GAME
+        }
+        profiles.append({
+            "team": record["team"],
+            "normalized": record["normalized"],
+            "games": int(record.get("games") or 0),
+            "per_game": per_game,
+            "goals_per_shot": record.get("goals_per_shot"),
+            "save_pct": record.get("save_pct"),
+            "clean_sheets": int(record.get("clean_sheets") or 0),
+        })
+    profiles.sort(key=lambda p: p["games"], reverse=True)
+    return profiles
 
 
 def with_rates(record: dict) -> dict:
@@ -125,11 +193,18 @@ def main():
 
     teams = sorted({r["team"] for r in records})
     print(f"Saved {len(records)} players across {len(teams)} teams to {OUTPUT_FILE}")
-    print(f"Teams with data: {', '.join(teams)}")
-    if records:
-        top = records[0]
-        print(f"Sample — {top['player']} ({top['team']}), {top['minutes']:.0f} min: "
-              f"per90 {json.dumps(top['per90'])}")
+
+    team_profiles = collect_teams(fb)
+    with TEAMS_FILE.open("w") as file:
+        json.dump(team_profiles, file, indent=2)
+    print(f"Saved {len(team_profiles)} team profiles to {TEAMS_FILE}")
+
+    if team_profiles:
+        top = team_profiles[0]
+        pg = top["per_game"]
+        print(f"Sample team — {top['team']} ({top['games']}g): "
+              f"{pg['shots_on_target']} SoT, {pg['goals']} goals, "
+              f"{pg['goals_allowed']} conceded, {pg['fouls']} fouls per game")
 
 
 if __name__ == "__main__":

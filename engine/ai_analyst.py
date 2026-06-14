@@ -38,14 +38,19 @@ SYSTEM_PROMPT = (
     "is the strongest signal.\n"
     "- EV is measured against the 54.25% PrizePicks flex break-even. A play only "
     "makes sense if the win probability clears that and EV is positive.\n"
-    "- WEIGH THE MATCHUP. The context names the opponent. Use it together with "
-    "your own knowledge of both teams and the player: how strong is the opponent "
-    "and their defense (for a goalkeeper, the opponent's attack instead), is the "
-    "player's side likely to dominate and create chances or sit back and chase the "
-    "game, and is this player a primary attacking option or a peripheral one? A "
-    "favourable line against a weak opponent the player's team should control is "
-    "more trustworthy; a tempting line against an elite defense deserves scepticism. "
-    "Name the specific opponent in your reasoning when it drives the call.\n"
+    "- WEIGH THE MATCHUP, led by the tournament-form numbers when they are given. "
+    "The context may include this World Cup's form: the player's team attack and "
+    "style, and the opponent's defense (goals conceded, shots on target faced). "
+    "PREFER these actual numbers over general reputation — they reflect how the "
+    "teams have really played. But they are small samples (often one or two "
+    "matches), so do not over-read them; treat one game as weak evidence and fall "
+    "back on what you know about the teams. Ask: does this player's side create "
+    "enough chances, and is the opponent's defense leaky or stingy, to support the "
+    "line? For a goalkeeper, a leaky team in front of a busy keeper means more "
+    "saves. A favourable line against a defense that has been conceding chances is "
+    "more trustworthy; a tempting line against a defense keeping clean sheets "
+    "deserves scepticism. Name the specific opponent and cite the form when it "
+    "drives the call.\n"
     "- TAKE THE TRAP FLAGS SERIOUSLY. They catch the classic PrizePicks failure "
     "mode: a 'great' line gap that is really the sharp books pricing in news PP "
     "hasn't reacted to (injuries, stale board, books disagreeing). If a serious "
@@ -118,6 +123,9 @@ def build_context(edge: dict) -> dict:
     game = edge.get("game") or ""
     opponent = edge.get("opponent") or opponent_from_game(game, team)
 
+    from engine.team_profiles import team_form
+    form = team_form(team, opponent)
+
     return {
         "player": edge.get("player") or edge.get("pp_player_name"),
         "team": team,
@@ -134,6 +142,7 @@ def build_context(edge: dict) -> dict:
         "edge_type": edge.get("edge_type"),
         "book_count": edge.get("book_count"),
         "trap_flags": flag_list,
+        "team_form": form,
     }
 
 
@@ -163,6 +172,20 @@ def format_prompt(ctx: dict) -> str:
         f"  edge type: {ctx.get('edge_type')}",
         f"  books contributing: {ctx.get('book_count')}",
     ]
+    form = ctx.get("team_form") or {}
+    if form:
+        lines.append("")
+        lines.append("Tournament form so far (this World Cup — small samples, "
+                     "weigh accordingly):")
+        if form.get("team_attack"):
+            lines.append(f"  {ctx.get('team')} attack ({form.get('team_games')}g): "
+                         f"{form['team_attack']}")
+        if form.get("team_style"):
+            lines.append(f"  {ctx.get('team')} style: {form['team_style']}")
+        if form.get("opponent_defense"):
+            lines.append(f"  {ctx.get('opponent')} defense "
+                         f"({form.get('opponent_games')}g): {form['opponent_defense']}")
+
     flags = ctx.get("trap_flags") or []
     lines.append("")
     if flags:

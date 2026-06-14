@@ -50,14 +50,14 @@ ACTION_CATALOG = {
         "title": "Update World Cup Form",
         "command": "python3 scrapers/fbref_stats.py",
         "description": (
-            "Scrapes each World Cup player's tournament stats from FBref (via "
-            "soccerdata, which clears Cloudflare) to price PrizePicks stats no "
-            "sportsbook posts — saves, fouls, fouls drawn, tackles, crosses, "
-            "offsides. Cached locally; only new matches trigger a fetch. These "
-            "plays are modeled (not market-verified), so they cap at MAYBE."
+            "Scrapes World Cup player AND team stats from FBref (via soccerdata, "
+            "which clears Cloudflare). Player stats price book-less PrizePicks "
+            "stats (saves, fouls, tackles, crosses, offsides — capped at MAYBE). "
+            "Team profiles (attack/defense/style) feed the AI analyst as live "
+            "matchup context. Cached locally; only new matches trigger a fetch."
         ),
         "api_calls": "None billed — FBref is free (web scrape)",
-        "writes_to": "data/processed/fbref_wc_stats.json",
+        "writes_to": "data/processed/fbref_wc_stats.json, fbref_wc_teams.json",
     },
     "run_matcher": {
         "title": "Run Edge Detection",
