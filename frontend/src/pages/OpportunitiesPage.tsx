@@ -1,6 +1,12 @@
-import { AlertTriangle, Download } from "lucide-react";
+import { AlertTriangle, Download, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { api, type Edge, type EdgesResponse, type RecordSummary } from "../lib/api";
+import {
+  api,
+  type AiRecommendation,
+  type Edge,
+  type EdgesResponse,
+  type RecordSummary,
+} from "../lib/api";
 import {
   Badge,
   EmptyState,
@@ -21,14 +27,80 @@ function verdictVariant(verdict: Edge["verdict"]): "bet" | "maybe" | "skip" | "n
 
 const GRID = "grid-cols-[1.5fr_1.6fr_0.9fr_1.1fr_0.8fr_0.7fr]";
 
+function AiPanel({ edge }: { edge: Edge }) {
+  const [loading, setLoading] = useState(false);
+  const [rec, setRec] = useState<AiRecommendation | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const ask = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await api.analyzeEdge(edge);
+      if (res.ok && res.recommendation) {
+        setRec(res.recommendation);
+      } else {
+        setError(res.error ?? "Analysis failed.");
+      }
+    } catch {
+      setError("Could not reach the analyst.");
+    } finally {
+      setLoading(false);
+    }
+  }, [edge]);
+
+  return (
+    <div className="px-4 pb-3">
+      {!rec && (
+        <button
+          onClick={ask}
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 rounded-md border border-line-strong bg-card px-2.5 py-1 text-xs font-semibold text-ink-soft transition-colors hover:border-ink hover:text-ink disabled:opacity-50"
+        >
+          <Sparkles size={12} />
+          {loading ? "Asking Claude…" : "Ask AI"}
+        </button>
+      )}
+      {error && (
+        <p className="mt-1 text-xs text-skip">
+          AI: {error}{" "}
+          <button onClick={ask} className="underline hover:text-ink">
+            retry
+          </button>
+        </p>
+      )}
+      {rec && (
+        <div className="rounded-md border border-line bg-paper px-3 py-2.5">
+          <div className="mb-1.5 flex flex-wrap items-center gap-2">
+            <Badge variant={rec.pick === "PASS" ? "skip" : "bet"}>{rec.pick}</Badge>
+            <span className="tnum text-xs text-ink-faint">{rec.confidence}% confidence</span>
+            <Badge variant={rec.agrees_with_engine ? "info" : "maybe"}>
+              {rec.agrees_with_engine ? "agrees with engine" : "differs from engine"}
+            </Badge>
+          </div>
+          <p className="text-sm text-ink-soft">{rec.reasoning}</p>
+          {rec.key_factors.length > 0 && (
+            <ul className="mt-1.5 list-disc pl-4 text-xs text-ink-faint">
+              {rec.key_factors.map((factor, i) => (
+                <li key={i}>{factor}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PickRow({ edge }: { edge: Edge }) {
   const word = verdictWord(edge.verdict);
   return (
     <div
-      className={`grid ${GRID} items-center gap-4 border-b border-line px-4 py-4 transition-colors last:border-b-0 hover:bg-paper ${
+      className={`border-b border-line transition-colors last:border-b-0 hover:bg-paper ${
         word === "YES" ? "bg-bet-soft/30" : ""
       }`}
     >
+      <div className={`grid ${GRID} items-center gap-4 px-4 py-4`}>
       {/* who */}
       <div className="flex min-w-0 items-center gap-2">
         <div className="min-w-0">
@@ -91,7 +163,9 @@ function PickRow({ edge }: { edge: Edge }) {
         )}
       </div>
 
-      <p className="tnum text-right text-xs text-ink-faint">{formatTime(edge.flagged_at)}</p>
+        <p className="tnum text-right text-xs text-ink-faint">{formatTime(edge.flagged_at)}</p>
+      </div>
+      <AiPanel edge={edge} />
     </div>
   );
 }

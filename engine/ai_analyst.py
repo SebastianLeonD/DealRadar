@@ -1,0 +1,269 @@
+"""AI analyst: hand a flagged play's full context to Claude for an OVER/UNDER call.
+
+This sits on top of the engine's own pricing. Every signal the engine already
+computed — the sharp-consensus win probability, the EV over break-even, the
+verdict, the anchor line vs the PrizePicks line, the book count and any trap
+flags — is handed to Claude, which returns an independent OVER / UNDER / PASS
+call with plain-English reasoning. It is a second opinion that reads the
+warnings, not a replacement for the math.
+
+Backends (env AI_BACKEND):
+  * 'cli'  -> the logged-in `claude` CLI, which runs on your Claude Pro/Max
+              SUBSCRIPTION. No metered API key, no per-call billing.
+  * 'sdk'  -> the Anthropic API via ANTHROPIC_API_KEY (metered).
+  * 'auto' -> CLI when installed, else SDK (the default).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+
+AI_BACKEND = os.getenv("AI_BACKEND", "auto")
+AI_CLI_BINARY = os.getenv("AI_CLI_BINARY", "claude")
+AI_CLI_MODEL = os.getenv("AI_CLI_MODEL", "opus")
+AI_SDK_MODEL = os.getenv("AI_MODEL", "claude-opus-4-8")
+AI_MAX_TOKENS = int(os.getenv("AI_MAX_TOKENS", "16000"))
+
+SYSTEM_PROMPT = (
+    "You are a sharp sports-betting analyst reviewing a single PrizePicks player "
+    "prop. An automated engine has already priced it against a multi-book sharp "
+    "consensus (DraftKings, FanDuel, BetMGM, Caesars) and produced a verdict. "
+    "Your job is an independent second opinion: OVER, UNDER, or PASS.\n\n"
+    "How to reason:\n"
+    "- The sharp consensus win probability is the engine's best estimate of the "
+    "true chance. A PrizePicks line far from where the books sit, in your favour, "
+    "is the strongest signal.\n"
+    "- EV is measured against the 54.25% PrizePicks flex break-even. A play only "
+    "makes sense if the win probability clears that and EV is positive.\n"
+    "- TAKE THE TRAP FLAGS SERIOUSLY. They catch the classic PrizePicks failure "
+    "mode: a 'great' line gap that is really the sharp books pricing in news PP "
+    "hasn't reacted to (injuries, stale board, books disagreeing). If a serious "
+    "flag is present, lean toward PASS even when the math looks good.\n"
+    "- Low-count stats (shots, shots on target, goals, threes) are noisy; a thin "
+    "edge from a single book is weak evidence.\n"
+    "- Be disciplined: a confident PASS beats a marginal bet. Do not invent "
+    "information that is not in the context."
+)
+
+_JSON_INSTRUCTION = (
+    "Respond with ONLY a JSON object (no markdown, no code fences, no prose) of "
+    "exactly this shape:\n"
+    '{"pick": "OVER"|"UNDER"|"PASS", "confidence": <int 0-100>, '
+    '"agrees_with_engine": <true|false>, "reasoning": "<2-4 sentences>", '
+    '"key_factors": ["<short phrase>", ...]}'
+)
+
+
+# ---------------------------------------------------------------------------
+# Context + prompt (pure / testable)
+# ---------------------------------------------------------------------------
+def _num(value):
+    try:
+        return round(float(value), 4)
+    except (TypeError, ValueError):
+        return None
+
+
+def _stat_label(stat: str | None) -> str:
+    if not stat:
+        return ""
+    return stat.replace("player_", "").replace("_", " ")
+
+
+def build_context(edge: dict) -> dict:
+    """Normalise a frontend/DB edge row into the analyst's context. Pure."""
+    pp_line = _num(edge.get("pp_line"))
+    dk_line = _num(edge.get("dk_line") if edge.get("dk_line") is not None
+                   else edge.get("dk_line_at_flag"))
+    win_prob = _num(edge.get("win_prob"))
+    line_gap = round(dk_line - pp_line, 2) if (dk_line is not None and pp_line is not None) else None
+
+    flags = edge.get("flags")
+    if isinstance(flags, str):
+        flag_list = [f.strip() for f in flags.split("|") if f.strip()]
+    elif isinstance(flags, (list, tuple)):
+        flag_list = list(flags)
+    else:
+        flag_list = []
+
+    return {
+        "player": edge.get("player") or edge.get("pp_player_name"),
+        "team": edge.get("team") or "",
+        "stat_type": _stat_label(edge.get("stat_type")),
+        "prizepicks_line": pp_line,
+        "engine_favoured_side": edge.get("play"),
+        "engine_verdict": edge.get("verdict"),
+        "win_probability": win_prob,
+        "ev_percent": _num(edge.get("ev_percent")),
+        "sharp_anchor_line": dk_line,
+        "line_gap": line_gap,
+        "edge_type": edge.get("edge_type"),
+        "book_count": edge.get("book_count"),
+        "trap_flags": flag_list,
+    }
+
+
+def format_prompt(ctx: dict) -> str:
+    lines = [
+        f"Player: {ctx.get('player')} ({ctx.get('team') or 'team n/a'})",
+        f"Market: {ctx.get('stat_type')}",
+        f"PrizePicks line: {ctx.get('prizepicks_line')}",
+        f"Engine's favoured side: {ctx.get('engine_favoured_side')}  "
+        f"(verdict: {ctx.get('engine_verdict')})",
+        "",
+        "Sharp multi-book consensus:",
+        f"  true win probability of the favoured side: {_pct(ctx.get('win_probability'))}",
+        f"  EV over the 54.25% break-even: {_signed(ctx.get('ev_percent'))}",
+        f"  books' anchor line: {ctx.get('sharp_anchor_line')}  "
+        f"(gap vs PP line: {ctx.get('line_gap')})",
+        f"  edge type: {ctx.get('edge_type')}",
+        f"  books contributing: {ctx.get('book_count')}",
+    ]
+    flags = ctx.get("trap_flags") or []
+    lines.append("")
+    if flags:
+        lines.append("Trap flags raised by the engine:")
+        lines.extend(f"  - {flag}" for flag in flags)
+    else:
+        lines.append("Trap flags: none.")
+    lines.append("")
+    lines.append(
+        "Decide OVER, UNDER, or PASS for this PrizePicks line. Set "
+        "agrees_with_engine to whether your pick matches the engine's favoured side."
+    )
+    return "\n".join(lines)
+
+
+def _pct(value):
+    try:
+        return f"{float(value) * 100:.1f}%"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _signed(value):
+    try:
+        return f"{float(value):+.1f}%"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def extract_recommendation(text: str) -> dict:
+    """Parse the JSON verdict out of model text (tolerates fences/prose)."""
+    payload = _first_json_object(text)
+    pick = str(payload.get("pick", "PASS")).upper()
+    if pick not in ("OVER", "UNDER", "PASS"):
+        pick = "PASS"
+    factors = payload.get("key_factors") or []
+    if isinstance(factors, str):
+        factors = [factors]
+    try:
+        confidence = int(payload.get("confidence", 50))
+    except (TypeError, ValueError):
+        confidence = 50
+    return {
+        "pick": pick,
+        "confidence": max(0, min(100, confidence)),
+        "agrees_with_engine": bool(payload.get("agrees_with_engine", False)),
+        "reasoning": str(payload.get("reasoning", "")).strip(),
+        "key_factors": [str(f).strip() for f in factors if str(f).strip()],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Backends
+# ---------------------------------------------------------------------------
+def analyze_play(edge: dict, backend: str | None = None, runner=None) -> dict:
+    """Evaluate one edge with Claude. Returns the recommendation dict."""
+    ctx = build_context(edge)
+    backend = (backend or os.getenv("AI_BACKEND") or AI_BACKEND).lower()
+    if backend == "auto":
+        backend = "cli" if cli_available() else "sdk"
+    if backend == "cli":
+        return _analyze_via_cli(ctx, runner=runner)
+    return _analyze_via_sdk(ctx)
+
+
+def cli_available() -> bool:
+    return shutil.which(os.getenv("AI_CLI_BINARY", AI_CLI_BINARY)) is not None
+
+
+def _analyze_via_cli(ctx: dict, runner=None) -> dict:
+    runner = runner or subprocess.run
+    binary = os.getenv("AI_CLI_BINARY", AI_CLI_BINARY)
+    model = os.getenv("AI_CLI_MODEL", AI_CLI_MODEL)
+    prompt = f"{format_prompt(ctx)}\n\n{_JSON_INSTRUCTION}"
+    cmd = [
+        binary, "-p", prompt,
+        "--output-format", "json",
+        "--model", model,
+        "--append-system-prompt", SYSTEM_PROMPT,
+    ]
+    result = runner(cmd, capture_output=True, text=True, timeout=240)
+    if getattr(result, "returncode", 0) != 0:
+        raise RuntimeError(
+            f"`{binary}` CLI failed (exit {result.returncode}). "
+            f"{(result.stderr or '').strip()[:300]}"
+        )
+    stdout = (result.stdout or "").strip()
+    try:
+        envelope = json.loads(stdout)
+        text = envelope.get("result", stdout) if isinstance(envelope, dict) else stdout
+    except json.JSONDecodeError:
+        text = stdout
+    return extract_recommendation(text)
+
+
+def _analyze_via_sdk(ctx: dict) -> dict:
+    try:
+        import anthropic
+    except ModuleNotFoundError as error:
+        raise RuntimeError(
+            "The 'anthropic' package is required for the SDK backend. Install it, "
+            "or set AI_BACKEND=cli to use your Claude subscription via the CLI."
+        ) from error
+
+    if not (os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")):
+        raise RuntimeError(
+            "No Claude credentials. Use the `claude` CLI (AI_BACKEND=cli, your "
+            "subscription) or set ANTHROPIC_API_KEY for the metered API."
+        )
+
+    client = anthropic.Anthropic()
+    message = client.messages.create(
+        model=AI_SDK_MODEL,
+        max_tokens=AI_MAX_TOKENS,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": f"{format_prompt(ctx)}\n\n{_JSON_INSTRUCTION}"}],
+    )
+    text = "".join(b.text for b in message.content if getattr(b, "type", None) == "text")
+    return extract_recommendation(text)
+
+
+def _first_json_object(text: str) -> dict:
+    """Return the first JSON object in `text`, ignoring any surrounding prose.
+
+    Uses raw_decode so trailing text after the object (a common model habit)
+    doesn't break parsing.
+    """
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:]
+    decoder = json.JSONDecoder()
+    index = 0
+    while True:
+        start = text.find("{", index)
+        if start == -1:
+            raise ValueError(f"No JSON object found in model output: {text[:200]!r}")
+        try:
+            obj, _ = decoder.raw_decode(text[start:])
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            pass
+        index = start + 1

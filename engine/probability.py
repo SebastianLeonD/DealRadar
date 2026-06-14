@@ -260,6 +260,62 @@ def slip_ev(probs: list[float], structure: str) -> float | None:
     return round(expected - 1, 4)
 
 
+# Fractional-Kelly multiplier. Full Kelly is brutally volatile on parlay
+# products; a quarter-Kelly stake is the common conservative choice.
+KELLY_MULTIPLIER = 0.25
+
+
+def _slip_outcomes(probs: list[float], structure: str) -> list[tuple[float, float]] | None:
+    """[(probability, gross_multiplier)] over k-of-n hits for a slip."""
+    n = len(probs)
+    dist = _hit_distribution(probs)
+    if structure == 'power':
+        payout = POWER_PAYOUTS.get(n)
+        if payout is None:
+            return None
+        return [(dist[k], payout if k == n else 0.0) for k in range(n + 1)]
+    payouts = FLEX_PAYOUTS.get(n)
+    if payouts is None:
+        return None
+    return [(dist[k], payouts.get(k, 0.0)) for k in range(n + 1)]
+
+
+def kelly_fraction(
+    probs: list[float],
+    structure: str,
+    multiplier: float = KELLY_MULTIPLIER,
+) -> float:
+    """Growth-optimal bankroll fraction for a slip, scaled by fractional Kelly.
+
+    Maximises expected log-growth over the slip's payout outcomes (assumes
+    independent legs, like slip_ev). Returns 0 when the slip has no edge.
+    """
+    outcomes = _slip_outcomes(probs, structure)
+    if not outcomes:
+        return 0.0
+    if sum(p * (m - 1.0) for p, m in outcomes) <= 0:  # no positive EV -> no bet
+        return 0.0
+
+    def growth(f: float) -> float:
+        total = 0.0
+        for p, m in outcomes:
+            wealth = 1.0 - f + f * m
+            if wealth <= 0:
+                return float('-inf')
+            total += p * math.log(wealth)
+        return total
+
+    lo, hi = 0.0, 0.999
+    for _ in range(200):
+        m1 = lo + (hi - lo) / 3.0
+        m2 = hi - (hi - lo) / 3.0
+        if growth(m1) < growth(m2):
+            lo = m1
+        else:
+            hi = m2
+    return round((lo + hi) / 2.0 * multiplier, 4)
+
+
 def best_slips(picks: list[dict], max_picks: int = 6) -> list[dict]:
     """Rank slip structures over the strongest picks.
 
@@ -285,6 +341,7 @@ def best_slips(picks: list[dict], max_picks: int = 6) -> list[dict]:
                 'players': [leg['player'] for leg in legs],
                 'ev_per_dollar': ev,
                 'ev_percent': round(ev * 100, 1),
+                'kelly_pct': round(kelly_fraction(probs, structure) * 100, 1),
                 'correlated_teams': correlated,
             })
 

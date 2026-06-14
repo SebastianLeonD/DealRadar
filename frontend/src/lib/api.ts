@@ -89,6 +89,20 @@ export interface PipelineResult {
   edges_found?: number;
 }
 
+export interface AiRecommendation {
+  pick: "OVER" | "UNDER" | "PASS";
+  confidence: number;
+  agrees_with_engine: boolean;
+  reasoning: string;
+  key_factors: string[];
+}
+
+export interface AnalyzeResponse {
+  ok: boolean;
+  recommendation?: AiRecommendation;
+  error?: string;
+}
+
 export interface ActionInfo {
   title: string;
   command: string;
@@ -125,6 +139,12 @@ export const api = {
     request<EdgesResponse>(
       `/edges?stat=${encodeURIComponent(stat)}&edge_type=${encodeURIComponent(edgeType)}`,
     ),
+  analyzeEdge: (edge: Edge) =>
+    request<AnalyzeResponse>("/edges/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(edge),
+    }),
   getClv: (refresh = false) =>
     request<ClvResponse>(`/clv?refresh=${refresh}`),
   refreshClv: () =>

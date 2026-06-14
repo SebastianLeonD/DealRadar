@@ -407,6 +407,7 @@ def print_slip_suggestions(flagged_bets: list[dict]) -> None:
         corr = '  [same-team legs!]' if suggestion['correlated_teams'] else ''
         print(
             f"  {suggestion['structure'].ljust(13)} EV {suggestion['ev_percent']:+.1f}%  "
+            f"stake {suggestion.get('kelly_pct', 0):.1f}% bankroll  "
             f"{', '.join(suggestion['players'])}{corr}"
         )
 

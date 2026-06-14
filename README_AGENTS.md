@@ -296,3 +296,25 @@ anchored to DraftKings only (not the consensus) for consistency.
 5. **Pre-game closing snapshot** — auto-tag last scrape before `commence_time` as true close
 6. **Calibration curve UI** — predicted win % vs actual hit rate on the dashboard
 7. **Slate filtering** — hide props whose `commence_time` has passed
+
+---
+
+## AI Analyst (ships backlog #2)
+
+Each pick on the Opportunities page has an **Ask AI** button. It sends the play's
+full context — the sharp-consensus win probability, EV over break-even, the
+anchor line vs the PrizePicks line, book count, and every trap flag — to Claude,
+which returns an independent **OVER / UNDER / PASS** call with confidence,
+reasoning, and key factors. It's a second opinion that reads the warnings: a
+serious trap flag pushes it toward PASS even when the math looks good, and it
+shows whether it **agrees with or differs from** the engine's verdict.
+
+- **Runs on your Claude subscription.** `engine/ai_analyst.py` shells out to the
+  logged-in `claude` CLI by default (`AI_BACKEND=auto`/`cli`) — no metered API
+  key. Set `AI_BACKEND=sdk` + `ANTHROPIC_API_KEY` to use the metered API instead.
+- **Endpoint:** `POST /api/edges/analyze` (takes an edge row, returns the verdict).
+- **Tests:** `pip install pytest && python3 -m pytest tests/` (AI analyst + Kelly).
+
+**Kelly stake sizing:** slip suggestions now also carry a fractional-Kelly stake
+(`kelly_pct`) — the matcher tells you not just *which* slip but *how much* of
+your bankroll to put on it.

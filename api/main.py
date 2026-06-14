@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -106,6 +107,37 @@ def pipeline_full():
 def pipeline_settle():
     success, output = run_script("engine/settlement.py")
     return {"success": success, "output": output or "Settlement complete."}
+
+
+class AnalyzeRequest(BaseModel):
+    """An edge row as the frontend already holds it (all fields optional)."""
+
+    player: str | None = None
+    pp_player_name: str | None = None
+    team: str | None = None
+    stat_type: str | None = None
+    play: str | None = None
+    pp_line: float | None = None
+    dk_line: float | None = None
+    dk_line_at_flag: float | None = None
+    edge_type: str | None = None
+    verdict: str | None = None
+    win_prob: float | None = None
+    ev_percent: float | None = None
+    book_count: int | None = None
+    flags: str | None = None
+
+
+@app.post("/api/edges/analyze")
+def analyze_edge(req: AnalyzeRequest):
+    """Second-opinion OVER/UNDER/PASS call from Claude (your subscription)."""
+    from engine.ai_analyst import analyze_play
+
+    try:
+        recommendation = analyze_play(req.model_dump())
+        return {"ok": True, "recommendation": recommendation}
+    except Exception as error:  # surface a clean message to the UI
+        return {"ok": False, "error": str(error)}
 
 
 @app.get("/api/record")
