@@ -16,6 +16,7 @@ from engine.sports import get_sport
 
 RAW_FILE = Path('data/raw/prizepicks_raw.json')
 OUTPUT_FILE = Path('data/processed/live.json')
+BOARD_FILE = Path('data/processed/pp_board.json')
 
 
 def build_player_lookup(included):
@@ -105,6 +106,52 @@ def parse_prizepicks_board(raw_data, sport: dict):
     return clean_picks, skipped_stats
 
 
+def build_full_board(raw_data, sport: dict):
+    """Every standard PrizePicks prop, mapped or not — the full bet menu.
+
+    Unlike parse_prizepicks_board (which drops stats the engine can't price),
+    this keeps all stat types so the PrizePicks-only view can show them and the
+    stats analyst can be asked about any of them. `mapped_stat` is the engine's
+    player_* key when we have one, else None.
+    """
+    stat_map = sport['pp_stat_map']
+    duration_suffixes = sport.get('pp_duration_suffixes', {})
+    player_lookup = build_player_lookup(raw_data.get('included', []))
+    board = []
+
+    for prop in raw_data.get('data', []):
+        attrs = prop.get('attributes', {})
+        if attrs.get('odds_type') != 'standard':
+            continue
+        ref = prop.get('relationships', {}).get('new_player', {}).get('data')
+        if not ref:
+            continue
+        player_attrs = player_lookup.get(ref['id'])
+        if not player_attrs:
+            continue
+        line = attrs.get('line_score')
+        stat_type = attrs.get('stat_type')
+        if line is None or not stat_type:
+            continue
+
+        base = stat_type[:-len(' (Combo)')].strip() if stat_type.endswith(' (Combo)') else stat_type
+        mapped = stat_map.get(base)
+        duration = detect_duration(attrs)
+        if mapped and duration:
+            suffix = duration_suffixes.get(duration)
+            mapped = f"{mapped}{suffix}" if suffix else None
+
+        board.append({
+            'name': player_attrs['name'],
+            'team': format_team_name(player_attrs),
+            'stat_type': stat_type,      # raw PP display name
+            'mapped_stat': mapped,       # engine key, or None when unpriced
+            'line': line,
+        })
+
+    return board
+
+
 def main():
     if not RAW_FILE.exists():
         raise SystemExit(f"Missing raw file: {RAW_FILE}")
@@ -118,6 +165,11 @@ def main():
 
     with OUTPUT_FILE.open('w') as file:
         json.dump(clean_picks, file, indent=4)
+
+    full_board = build_full_board(raw_data, sport)
+    with BOARD_FILE.open('w') as file:
+        json.dump(full_board, file, indent=4)
+    print(f"Saved full PrizePicks board ({len(full_board)} props) to {BOARD_FILE}")
 
     kept = Counter(pick['stat_type'] for pick in clean_picks)
     print(f"[{sport['label']}] Mapped {len(clean_picks)} props: "

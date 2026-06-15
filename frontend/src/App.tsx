@@ -4,6 +4,7 @@ import { ClvPage } from "./pages/ClvPage";
 import { ExecutionPage } from "./pages/ExecutionPage";
 import { HelpPage } from "./pages/HelpPage";
 import { OpportunitiesPage } from "./pages/OpportunitiesPage";
+import { PrizePicksBoardPage } from "./pages/PrizePicksBoardPage";
 import type { Page } from "./lib/api";
 
 export default function App() {
@@ -14,6 +15,7 @@ export default function App() {
       <TopNav active={page} onNavigate={setPage} />
       <main className="mx-auto max-w-5xl px-6 py-10">
         {page === "opportunities" && <OpportunitiesPage />}
+        {page === "prizepicks" && <PrizePicksBoardPage />}
         {page === "execution" && <ExecutionPage />}
         {page === "clv" && <ClvPage />}
         {page === "help" && <HelpPage />}

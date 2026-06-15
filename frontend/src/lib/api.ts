@@ -1,4 +1,4 @@
-export type Page = "execution" | "opportunities" | "clv" | "help";
+export type Page = "execution" | "opportunities" | "prizepicks" | "clv" | "help";
 
 /** "full" weighs the sharp books; "stats_only" is a PrizePicks-only, form-based read. */
 export type AnalysisMode = "full" | "stats_only";
@@ -124,6 +124,25 @@ export interface PromptResponse {
   sent: SentToAi;
 }
 
+export interface PpBoardProp {
+  player: string;
+  team: string | null;
+  line: number;
+}
+
+export interface PpBoardGroup {
+  stat_type: string;
+  mapped_stat: string | null;
+  has_form_data: boolean;
+  count: number;
+  props: PpBoardProp[];
+}
+
+export interface PpBoardResponse {
+  total: number;
+  groups: PpBoardGroup[];
+}
+
 export interface ActionInfo {
   title: string;
   command: string;
@@ -158,6 +177,7 @@ export const api = {
   settleResults: () =>
     request<PipelineResult>("/pipeline/settle", { method: "POST" }),
   getRecord: () => request<RecordSummary>("/record"),
+  getPrizePicksBoard: () => request<PpBoardResponse>("/prizepicks/board"),
   getEdges: (stat: string, edgeType: string) =>
     request<EdgesResponse>(
       `/edges?stat=${encodeURIComponent(stat)}&edge_type=${encodeURIComponent(edgeType)}`,

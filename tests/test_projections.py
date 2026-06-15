@@ -94,6 +94,11 @@ def test_player_form_falls_back_to_full_match_for_1h_props():
     assert pf is not None and pf["stat"] == "shots"
 
 
+def test_player_form_tags_its_source():
+    pf = player_form("Test Striker", "player_shots", FORM_PLAYERS)
+    assert pf["source"] == "World Cup"  # explicit pool is treated as WC form
+
+
 def test_stats_only_prompt_drops_the_sharp_book_block():
     edge = {"player": "Nobody Here", "team": "Narnia", "stat_type": "player_shots",
             "pp_line": 1.5, "win_prob": 0.6, "play": "OVER", "verdict": "LEAN"}

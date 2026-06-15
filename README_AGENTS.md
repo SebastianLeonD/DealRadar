@@ -144,7 +144,8 @@ Prizepicks/
 ├── scrapers/
 │   ├── draftkings_api.py         # Multi-book sharp lines + alternates (Odds-API)
 │   ├── prizepicks_api.py         # Parses pasted PP raw JSON into flat format
-│   ├── fbref_stats.py            # World Cup player form from FBref (model pricing)
+│   ├── fbref_stats.py            # World Cup player + team form from FBref
+│   ├── fbref_club_stats.py       # Club-season form (pre-tournament AI context)
 │   ├── injuries_api.py           # ESPN injury report (free, cached 30 min)
 │   └── results_api.py            # ESPN box scores (free)
 ├── engine/
@@ -370,12 +371,28 @@ transparency into what's being asked and how.
 **Two analysis modes** (toggle next to the verdict chips):
 - **Full** — the read described above, anchored to the sharp-book consensus.
 - **PrizePicks-only** — drops all sportsbook data and judges the play from the
-  *stats alone*: the player's tournament per-game rate (FBref) plus the team
-  form, no win%/EV. The "stats half" of the analysis — the right tool for the
-  many PP props with no book line. Uses a separate system prompt
+  *stats alone*: the player's per-game rate (FBref) plus the team form, no
+  win%/EV. The "stats half" of the analysis — the right tool for the many PP
+  props with no book line. Uses a separate system prompt
   (`STATS_ONLY_SYSTEM_PROMPT`) that leads from the player's rate, respects small
   samples, and defaults to PASS when there's no real basis. Pass `mode` to
   `/api/edges/analyze` and `/api/edges/prompt` (`"full"` | `"stats_only"`).
+
+The player rate comes from `engine/projections.py:player_form`, which prefers
+World Cup form and **falls back to club-season form** (`scrapers/fbref_club_stats.py`
+→ `data/processed/fbref_club_stats.json`, Big-5 leagues, ~42% of a WC squad) so a
+player has a number *before* their first tournament match. The prompt tags the
+source ("World Cup" vs "club season 2025-26").
+
+### PrizePicks Board (the full menu)
+
+`scrapers/prizepicks_api.py` also writes the **complete** parsed board
+(`data/processed/pp_board.json`) — every stat type, including ones no book prices
+and the engine can't grade (Passes, Dribbles, Shots Assisted, Fantasy Score,
+Clearances). `GET /api/prizepicks/board` groups these by stat type with a
+`has_form_data` flag, and the **PrizePicks Board** tab lists them all with a
+stats-only "Ask Claude" on each. Stats without a form feed are clearly marked
+"no stats yet" — Claude can only give a general read there.
 
 The board itself only lists **today's upcoming, unsettled plays**: settled
 results and games that have already kicked off drop off automatically (your

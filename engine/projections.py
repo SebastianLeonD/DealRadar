@@ -22,6 +22,7 @@ from engine.name_matcher import match_player_name
 from engine.probability import assign_verdict, ev_percent, poisson_p_over_push_adjusted
 
 FBREF_FILE = Path("data/processed/fbref_wc_stats.json")
+CLUB_FILE = Path("data/processed/fbref_club_stats.json")
 
 # PrizePicks stat_type -> the FBref field that measures it. Only stats the books
 # don't price live here; shots/SoT/goals stay on the sharp-book path.
@@ -52,17 +53,10 @@ def model_stat_types() -> list[str]:
     return list(FIELD_BY_STAT)
 
 
-def player_form(name: str, stat_type: str, players: list[dict] | None = None) -> dict | None:
-    """A player's tournament rate for one stat, for AI context. None if unknown.
-
-    1H props (e.g. player_shots_1h) fall back to the full-match rate.
-    """
-    players = load_fbref_stats() if players is None else players
-    base = stat_type.replace("_1h", "") if stat_type else ""
-    field = FORM_FIELD_BY_STAT.get(base)
-    if not field or not players:
+def _form_from(name: str, field: str, players: list[dict], source: str) -> dict | None:
+    """Resolve a player's rate for `field` within one pool. None if not found."""
+    if not players:
         return None
-
     target = _normalize(name)
     record = next((p for p in players if p["normalized"] == target), None)
     if record is None:
@@ -82,7 +76,26 @@ def player_form(name: str, stat_type: str, players: list[dict] | None = None) ->
         "games": int(games),
         "minutes": int(record.get("minutes") or 0),
         "matched_name": record["player"],
+        "source": source,
     }
+
+
+def player_form(name: str, stat_type: str, players: list[dict] | None = None) -> dict | None:
+    """A player's rate for one stat, for AI context. None if unknown.
+
+    Prefers World Cup form, falls back to club-season form (a bigger, pre-
+    tournament sample). 1H props (e.g. player_shots_1h) use the full-match rate.
+    Passing `players` explicitly restricts to that single pool (used in tests).
+    """
+    field = FORM_FIELD_BY_STAT.get((stat_type or "").replace("_1h", ""))
+    if not field:
+        return None
+    if players is not None:
+        return _form_from(name, field, players, "World Cup")
+    return (
+        _form_from(name, field, load_fbref_stats(), "World Cup")
+        or _form_from(name, field, load_club_stats(), "club season 2025-26")
+    )
 
 
 def load_fbref_stats(path: Path = FBREF_FILE) -> list[dict]:
@@ -90,6 +103,10 @@ def load_fbref_stats(path: Path = FBREF_FILE) -> list[dict]:
         return []
     with path.open() as file:
         return json.load(file)
+
+
+def load_club_stats(path: Path = CLUB_FILE) -> list[dict]:
+    return load_fbref_stats(path)
 
 
 def _normalize(name: str) -> str:

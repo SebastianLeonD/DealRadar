@@ -105,8 +105,10 @@ def pipeline_full():
 
 @app.post("/api/pipeline/fetch-form")
 def pipeline_fetch_form():
-    success, output = run_script("scrapers/fbref_stats.py")
-    return {"success": success, "output": output or "World Cup form stats updated."}
+    wc_ok, wc_out = run_script("scrapers/fbref_stats.py")
+    club_ok, club_out = run_script("scrapers/fbref_club_stats.py")
+    output = f"{wc_out}\n\n{club_out}".strip()
+    return {"success": wc_ok and club_ok, "output": output or "Form stats updated."}
 
 
 @app.post("/api/pipeline/settle")
@@ -184,6 +186,47 @@ def analyze_edge(req: AnalyzeRequest):
         }
     except Exception as error:  # surface a clean message to the UI
         return {"ok": False, "error": str(error), "opponent": edge.get("opponent"), "sent": sent}
+
+
+@app.get("/api/prizepicks/board")
+def get_prizepicks_board():
+    """Every PrizePicks prop you pasted, grouped by stat type — the full menu,
+    including stats no sportsbook prices. `has_form_data` marks which stats the
+    AI has real numbers for (vs. ones it can only reason about generally)."""
+    import json
+    from collections import defaultdict
+
+    from engine.projections import FORM_FIELD_BY_STAT
+
+    board_file = PROJECT_ROOT / "data" / "processed" / "pp_board.json"
+    if not board_file.exists():
+        return {"total": 0, "groups": []}
+    with board_file.open() as file:
+        props = json.load(file)
+
+    def has_form(mapped: str | None) -> bool:
+        if not mapped:
+            return False
+        return mapped.replace("_1h", "") in FORM_FIELD_BY_STAT
+
+    grouped: dict[str, dict] = defaultdict(
+        lambda: {"props": [], "mapped_stat": None, "has_form_data": False}
+    )
+    for prop in props:
+        g = grouped[prop["stat_type"]]
+        g["mapped_stat"] = prop.get("mapped_stat")
+        g["has_form_data"] = has_form(prop.get("mapped_stat"))
+        g["props"].append(
+            {"player": prop["name"], "team": prop.get("team"), "line": prop["line"]}
+        )
+
+    groups = [
+        {"stat_type": stat, "count": len(g["props"]), **g}
+        for stat, g in grouped.items()
+    ]
+    # Stats we can actually analyze first, then by how many props.
+    groups.sort(key=lambda g: (g["has_form_data"], g["count"]), reverse=True)
+    return {"total": len(props), "groups": groups}
 
 
 @app.get("/api/record")

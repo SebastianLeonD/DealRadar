@@ -204,8 +204,8 @@ def format_prompt(ctx: dict) -> str:
         lines.append("")
         if pf:
             lines.append(
-                f"Player form this World Cup: {pf['per_game']} {pf['stat']} per game "
-                f"over {pf['games']} match(es) ({pf['minutes']} min)."
+                f"Player form ({pf.get('source', 'World Cup')}): {pf['per_game']} "
+                f"{pf['stat']} per game over {pf['games']} match(es) ({pf['minutes']} min)."
             )
         else:
             lines.append("Player form: no tournament data yet for this stat — "
