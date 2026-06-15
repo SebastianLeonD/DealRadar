@@ -161,6 +161,34 @@ def test_cli_available_returns_bool():
     assert isinstance(ai_analyst.cli_available(), bool)
 
 
+# --- per-book picks when PrizePicks and Underdog differ ---
+
+def test_two_book_prompt_asks_for_each_line():
+    edge = {**_edge(), "pp_line": 3.0, "ud_line": 2.5}
+    sent = ai_analyst.describe_request(edge)
+    assert "Underdog line: 2.5" in sent["prompt"]
+    assert "underdog_pick" in sent["response_format"]
+
+
+def test_same_line_does_not_ask_for_a_second_pick():
+    edge = {**_edge(), "pp_line": 2.5, "ud_line": 2.5}
+    sent = ai_analyst.describe_request(edge)
+    assert "underdog_pick" not in sent["response_format"]
+
+
+def test_extract_parses_underdog_pick():
+    rec = extract_recommendation(
+        '{"pick":"UNDER","underdog_pick":"OVER","confidence":65,'
+        '"agrees_with_engine":false,"reasoning":"r","key_factors":["a"]}'
+    )
+    assert rec["pick"] == "UNDER" and rec["underdog_pick"] == "OVER"
+
+
+def test_extract_omits_underdog_pick_when_absent():
+    rec = extract_recommendation('{"pick":"OVER","confidence":60,"reasoning":"r"}')
+    assert rec["underdog_pick"] is None
+
+
 def test_cli_model_splits_by_mode():
     # Picks (full) get opus; the high-volume board (stats_only) gets haiku.
     def capture(store):

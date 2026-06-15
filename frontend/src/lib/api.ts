@@ -39,6 +39,7 @@ export interface Edge {
   play: "OVER" | "UNDER";
   pp_line: number;
   dk_line: number;
+  ud_line?: number | null;
   edge_type: "Line Discrepancy" | "+EV Odds Juice" | "Duration Model" | string;
   probability_text: string;
   dk_over_prob: number;
@@ -108,6 +109,7 @@ export interface PipelineResult {
 
 export interface AiRecommendation {
   pick: "OVER" | "UNDER" | "PASS";
+  underdog_pick?: "OVER" | "UNDER" | "PASS" | null;
   confidence: number;
   agrees_with_engine: boolean;
   reasoning: string;

@@ -136,6 +136,7 @@ class AnalyzeRequest(BaseModel):
     play: str | None = None
     pp_line: float | None = None
     dk_line: float | None = None
+    ud_line: float | None = None
     dk_line_at_flag: float | None = None
     edge_type: str | None = None
     verdict: str | None = None

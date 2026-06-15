@@ -34,6 +34,7 @@ function toEdge(group: PpBoardGroup, prop: PpBoardProp, id: number): Edge {
     opponent: prop.opponent ?? null,
     stat_type: group.mapped_stat ?? group.stat_type,
     pp_line: prop.line,
+    ud_line: prop.underdog?.ud_line ?? null,
     play: e?.play ?? "OVER",
     win_prob: e?.win_prob ?? null,
     ev_percent: e?.ev_percent ?? null,

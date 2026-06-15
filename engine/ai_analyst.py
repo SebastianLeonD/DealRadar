@@ -108,6 +108,24 @@ _JSON_INSTRUCTION = (
 )
 
 
+def _json_instruction(ctx: dict | None = None) -> str:
+    """The required response shape — adds a second pick when the prop is offered
+    on PrizePicks and Underdog at different lines (the call can differ)."""
+    pp = ctx.get("prizepicks_line") if ctx else None
+    ud = ctx.get("underdog_line") if ctx else None
+    if ud is not None and pp is not None and ud != pp:
+        return (
+            "Respond with ONLY a JSON object (no markdown, no code fences, no prose) of "
+            "exactly this shape:\n"
+            '{"pick": "OVER"|"UNDER"|"PASS", "underdog_pick": "OVER"|"UNDER"|"PASS", '
+            '"confidence": <int 0-100>, "agrees_with_engine": <true|false>, '
+            '"reasoning": "<2-4 sentences>", "key_factors": ["<short phrase>", ...]}\n'
+            f"`pick` is your call for the PrizePicks line ({pp}); `underdog_pick` is your "
+            f"call for the Underdog line ({ud})."
+        )
+    return _JSON_INSTRUCTION
+
+
 # ---------------------------------------------------------------------------
 # Context + prompt (pure / testable)
 # ---------------------------------------------------------------------------
@@ -182,6 +200,7 @@ def build_context(edge: dict, mode: str = "full") -> dict:
         "matchup": game,
         "stat_type": _stat_label(edge.get("stat_type")),
         "prizepicks_line": pp_line,
+        "underdog_line": _num(edge.get("ud_line")),
         "engine_favoured_side": edge.get("play"),
         "engine_verdict": edge.get("verdict"),
         "win_probability": win_prob,
@@ -207,13 +226,18 @@ def format_prompt(ctx: dict) -> str:
         matchup_line = "Matchup: opponent unknown — reason from the numbers only"
 
     stats_only = ctx.get("mode") == "stats_only"
+    pp_line = ctx.get("prizepicks_line")
+    ud_line = ctx.get("underdog_line")
+    two_books = ud_line is not None and pp_line is not None and ud_line != pp_line
 
     lines = [
         f"Player: {ctx.get('player')} ({ctx.get('team') or 'team n/a'})",
         matchup_line,
         f"Market: {ctx.get('stat_type')}",
-        f"PrizePicks line: {ctx.get('prizepicks_line')}",
+        f"PrizePicks line: {pp_line}",
     ]
+    if two_books:
+        lines.append(f"Underdog line: {ud_line}  (different from PrizePicks — call each one)")
 
     if stats_only:
         pf = ctx.get("player_form")
@@ -261,16 +285,20 @@ def format_prompt(ctx: dict) -> str:
     else:
         lines.append("Trap flags: none.")
     lines.append("")
+    two_book_note = (
+        " Because the two lines differ, give a separate call for each: the player "
+        "can clear the lower line but not the higher."
+        if two_books else ""
+    )
     if stats_only:
         lines.append(
-            "Decide OVER, UNDER, or PASS for this PrizePicks line from the form and "
-            "matchup alone. There is no engine pick to compare to, so set "
-            "agrees_with_engine to false."
+            "Decide OVER, UNDER, or PASS from the form and matchup alone. There is no "
+            "engine pick to compare to, so set agrees_with_engine to false." + two_book_note
         )
     else:
         lines.append(
-            "Decide OVER, UNDER, or PASS for this PrizePicks line. Set "
-            "agrees_with_engine to whether your pick matches the engine's favoured side."
+            "Decide OVER, UNDER, or PASS. Set agrees_with_engine to whether your "
+            "PrizePicks call matches the engine's favoured side." + two_book_note
         )
     return "\n".join(lines)
 
@@ -290,7 +318,7 @@ def describe_request(edge: dict, mode: str = "full") -> dict:
         "context": ctx,
         "prompt": format_prompt(ctx),
         "system": _system_for(mode),
-        "response_format": _JSON_INSTRUCTION,
+        "response_format": _json_instruction(ctx),
     }
 
 
@@ -321,8 +349,12 @@ def extract_recommendation(text: str) -> dict:
         confidence = int(payload.get("confidence", 50))
     except (TypeError, ValueError):
         confidence = 50
+    underdog_pick = str(payload.get("underdog_pick", "")).upper()
+    if underdog_pick not in ("OVER", "UNDER", "PASS"):
+        underdog_pick = None
     return {
         "pick": pick,
+        "underdog_pick": underdog_pick,
         "confidence": max(0, min(100, confidence)),
         "agrees_with_engine": bool(payload.get("agrees_with_engine", False)),
         "reasoning": str(payload.get("reasoning", "")).strip(),
@@ -352,7 +384,7 @@ def _analyze_via_cli(ctx: dict, runner=None) -> dict:
     runner = runner or subprocess.run
     binary = os.getenv("AI_CLI_BINARY", AI_CLI_BINARY)
     model = _cli_model_for(ctx.get("mode", "full"))
-    prompt = f"{format_prompt(ctx)}\n\n{_JSON_INSTRUCTION}"
+    prompt = f"{format_prompt(ctx)}\n\n{_json_instruction(ctx)}"
     cmd = [
         binary, "-p", prompt,
         "--output-format", "json",
@@ -399,7 +431,7 @@ def _analyze_via_sdk(ctx: dict) -> dict:
         model=_sdk_model_for(ctx.get("mode", "full")),
         max_tokens=AI_MAX_TOKENS,
         system=_system_for(ctx.get("mode", "full")),
-        messages=[{"role": "user", "content": f"{format_prompt(ctx)}\n\n{_JSON_INSTRUCTION}"}],
+        messages=[{"role": "user", "content": f"{format_prompt(ctx)}\n\n{_json_instruction(ctx)}"}],
     )
     text = "".join(b.text for b in message.content if getattr(b, "type", None) == "text")
     return extract_recommendation(text)

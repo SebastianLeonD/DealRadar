@@ -120,11 +120,26 @@ export function PromptBox({ edge, mode }: { edge: Edge; mode: AnalysisMode }) {
 
 /* ---------- the AI verdict, shown in full ---------- */
 
-export function AiVerdict({ rec }: { rec: AiRecommendation }) {
+export function AiVerdict({ rec, edge }: { rec: AiRecommendation; edge?: Edge }) {
+  const twoBooks =
+    rec.underdog_pick != null &&
+    edge?.ud_line != null &&
+    edge.ud_line !== edge.pp_line;
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <Badge variant={rec.pick === "PASS" ? "skip" : "bet"}>AI: {rec.pick}</Badge>
+        {twoBooks ? (
+          <>
+            <Badge variant={rec.pick === "PASS" ? "skip" : "bet"}>
+              PrizePicks: {rec.pick} {edge!.pp_line}
+            </Badge>
+            <Badge variant={rec.underdog_pick === "PASS" ? "skip" : "bet"}>
+              Underdog: {rec.underdog_pick} {edge!.ud_line}
+            </Badge>
+          </>
+        ) : (
+          <Badge variant={rec.pick === "PASS" ? "skip" : "bet"}>AI: {rec.pick}</Badge>
+        )}
         <span className="tnum text-xs text-ink-faint">{rec.confidence}% confident</span>
         <Badge variant={rec.agrees_with_engine ? "info" : "maybe"}>
           {rec.agrees_with_engine ? "agrees with engine" : "differs from engine"}
@@ -186,7 +201,7 @@ export function AiResult({
   }
   return (
     <div>
-      <AiVerdict rec={entry.rec!} />
+      <AiVerdict rec={entry.rec!} edge={edge} />
       <button
         onClick={() => onAnalyze(edge)}
         className="mt-2 text-[11px] text-ink-faint underline hover:text-ink"
