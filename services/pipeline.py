@@ -5,6 +5,9 @@ import sys
 from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+EASTERN = ZoneInfo("America/New_York")  # show all times in NY Eastern
 
 import pandas as pd
 
@@ -185,7 +188,10 @@ def format_status_label(source: str) -> tuple[str, str]:
         return "stale", "No data ingested yet"
 
     status = "fresh" if is_fresh(last_capture) else "aging"
-    timestamp = last_capture.strftime("%Y-%m-%d %H:%M UTC")
+    when = last_capture
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    timestamp = when.astimezone(EASTERN).strftime("%Y-%m-%d %H:%M ET")
     return status, f"Last {source} sync: {timestamp}"
 
 

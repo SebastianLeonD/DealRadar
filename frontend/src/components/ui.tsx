@@ -146,12 +146,17 @@ export function WinBar({ prob }: { prob: number }) {
   );
 }
 
+/** Every time in the app is shown in New York Eastern, regardless of the
+ *  viewer's own timezone. */
+export const ET_TZ = "America/New_York";
+
 export function formatTime(iso: string): string {
   try {
     return new Date(iso).toLocaleTimeString("en-US", {
       hour: "numeric",
       minute: "2-digit",
       hour12: true,
+      timeZone: ET_TZ,
     });
   } catch {
     return iso;
@@ -163,6 +168,7 @@ export function formatDate(iso: string): string {
     return new Date(iso).toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
+      timeZone: ET_TZ,
     });
   } catch {
     return iso;

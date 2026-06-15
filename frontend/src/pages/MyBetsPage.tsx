@@ -1,17 +1,19 @@
 import { CheckCircle2, Loader2, Swords, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api, type Bet, type BetsResponse } from "../lib/api";
-import { Badge, EmptyState, MetricCard, PageHeader, SearchBox, statLabel } from "../components/ui";
+import { Badge, EmptyState, ET_TZ, MetricCard, PageHeader, SearchBox, statLabel } from "../components/ui";
 
 function kickoff(iso: string | null): string {
   if (!iso) return "";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString([], {
+  const when = date.toLocaleString("en-US", {
     weekday: "short",
     hour: "numeric",
     minute: "2-digit",
+    timeZone: ET_TZ,
   });
+  return `${when} ET`;
 }
 
 function resultVariant(result: Bet["result"]): "bet" | "skip" | "neutral" {

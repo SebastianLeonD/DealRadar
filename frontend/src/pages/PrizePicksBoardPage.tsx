@@ -17,6 +17,7 @@ import {
   PageHeader,
   SearchBox,
   statLabel,
+  ET_TZ,
   verdictWord,
   WinBar,
 } from "../components/ui";
@@ -54,7 +55,13 @@ function kickoff(iso: string | null | undefined): string {
   if (!iso) return "";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+  const when = date.toLocaleString("en-US", {
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: ET_TZ,
+  });
+  return `${when} ET`;
 }
 
 function verdictVariant(verdict: PpEngine["verdict"]): "bet" | "maybe" | "skip" | "neutral" {
