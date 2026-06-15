@@ -17,6 +17,7 @@ from engine.sports import get_sport
 RAW_FILE = Path('data/raw/prizepicks_raw.json')
 OUTPUT_FILE = Path('data/processed/live.json')
 BOARD_FILE = Path('data/processed/pp_board.json')
+GAMES_FILE = Path('data/processed/pp_games.json')
 
 
 def build_player_lookup(included):
@@ -144,12 +145,49 @@ def build_full_board(raw_data, sport: dict):
         board.append({
             'name': player_attrs['name'],
             'team': format_team_name(player_attrs),
+            'position': (player_attrs.get('position') or '').strip() or None,
+            'image_url': (player_attrs.get('image_url') or '').strip() or None,
+            'opponent': (attrs.get('description') or '').strip() or None,
+            'game_id': attrs.get('game_id'),
+            'start_time': attrs.get('start_time'),
             'stat_type': stat_type,      # raw PP display name
             'mapped_stat': mapped,       # engine key, or None when unpriced
             'line': line,
         })
 
     return board
+
+
+def build_games(raw_data):
+    """The matchups on the board: one entry per game with both team names.
+
+    PrizePicks puts the full fixture in each `game` include's metadata. Its
+    `game_id` string is what projections reference (attributes.game_id), so the
+    board props join back to these by that key.
+    """
+    games = []
+    for item in raw_data.get('included', []):
+        if item.get('type') != 'game':
+            continue
+        attrs = item.get('attributes', {})
+        meta = attrs.get('metadata') or {}
+        game_id = meta.get('game_id')
+        if not game_id:
+            continue
+        teams = (meta.get('game_info') or {}).get('teams') or {}
+
+        def side_name(side):
+            team = teams.get(side) or {}
+            return team.get('name') or team.get('abbreviation') or 'TBD'
+
+        games.append({
+            'game_id': game_id,
+            'home': side_name('home'),
+            'away': side_name('away'),
+            'start_time': attrs.get('start_time'),
+            'status': meta.get('status') or attrs.get('status'),
+        })
+    return games
 
 
 def main():
@@ -170,6 +208,11 @@ def main():
     with BOARD_FILE.open('w') as file:
         json.dump(full_board, file, indent=4)
     print(f"Saved full PrizePicks board ({len(full_board)} props) to {BOARD_FILE}")
+
+    games = build_games(raw_data)
+    with GAMES_FILE.open('w') as file:
+        json.dump(games, file, indent=4)
+    print(f"Saved {len(games)} games to {GAMES_FILE}")
 
     kept = Counter(pick['stat_type'] for pick in clean_picks)
     print(f"[{sport['label']}] Mapped {len(clean_picks)} props: "

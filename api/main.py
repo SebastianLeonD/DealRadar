@@ -194,13 +194,13 @@ def get_prizepicks_board():
     including stats no sportsbook prices. `has_form_data` marks which stats the
     AI has real numbers for (vs. ones it can only reason about generally)."""
     import json
-    from collections import defaultdict
+    from collections import Counter, defaultdict
 
     from engine.projections import FORM_FIELD_BY_STAT
 
     board_file = PROJECT_ROOT / "data" / "processed" / "pp_board.json"
     if not board_file.exists():
-        return {"total": 0, "groups": []}
+        return {"total": 0, "groups": [], "games": []}
     with board_file.open() as file:
         props = json.load(file)
 
@@ -217,7 +217,16 @@ def get_prizepicks_board():
         g["mapped_stat"] = prop.get("mapped_stat")
         g["has_form_data"] = has_form(prop.get("mapped_stat"))
         g["props"].append(
-            {"player": prop["name"], "team": prop.get("team"), "line": prop["line"]}
+            {
+                "player": prop["name"],
+                "team": prop.get("team"),
+                "line": prop["line"],
+                "position": prop.get("position"),
+                "image_url": prop.get("image_url"),
+                "opponent": prop.get("opponent"),
+                "game_id": prop.get("game_id"),
+                "start_time": prop.get("start_time"),
+            }
         )
 
     groups = [
@@ -226,7 +235,22 @@ def get_prizepicks_board():
     ]
     # Stats we can actually analyze first, then by how many props.
     groups.sort(key=lambda g: (g["has_form_data"], g["count"]), reverse=True)
-    return {"total": len(props), "groups": groups}
+
+    # The matchups on the board, keeping only games that actually have props.
+    games_file = PROJECT_ROOT / "data" / "processed" / "pp_games.json"
+    games: list[dict] = []
+    if games_file.exists():
+        with games_file.open() as file:
+            all_games = json.load(file)
+        counts = Counter(p.get("game_id") for p in props)
+        games = [
+            {**game, "count": counts[game["game_id"]]}
+            for game in all_games
+            if counts.get(game["game_id"])
+        ]
+        games.sort(key=lambda g: g.get("start_time") or "")
+
+    return {"total": len(props), "groups": groups, "games": games}
 
 
 @app.get("/api/record")

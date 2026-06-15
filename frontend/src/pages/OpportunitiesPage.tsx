@@ -1,12 +1,6 @@
 import { AlertTriangle, ChevronDown, Download, Loader2, Sparkles, Swords } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import {
-  api,
-  type AnalysisMode,
-  type Edge,
-  type EdgesResponse,
-  type RecordSummary,
-} from "../lib/api";
+import { api, type Edge, type EdgesResponse, type RecordSummary } from "../lib/api";
 import {
   Badge,
   EmptyState,
@@ -71,12 +65,10 @@ function StrongPickCard({
   edge,
   entry,
   onAnalyze,
-  mode,
 }: {
   edge: Edge;
   entry: AiEntry | undefined;
   onAnalyze: (edge: Edge) => void;
-  mode: AnalysisMode;
 }) {
   const word = verdictWord(edge.verdict);
   const matchup = matchupLabel(edge);
@@ -152,7 +144,7 @@ function StrongPickCard({
           Claude's read
         </div>
         <AiResult edge={edge} entry={entry} onAnalyze={onAnalyze} />
-        <PromptBox edge={edge} mode={mode} />
+        <PromptBox edge={edge} mode="full" />
       </div>
     </div>
   );
@@ -166,12 +158,10 @@ function BoardRow({
   edge,
   entry,
   onAnalyze,
-  mode,
 }: {
   edge: Edge;
   entry: AiEntry | undefined;
   onAnalyze: (edge: Edge) => void;
-  mode: AnalysisMode;
 }) {
   const word = verdictWord(edge.verdict);
   const [open, setOpen] = useState(false);
@@ -251,7 +241,7 @@ function BoardRow({
       {open && (
         <div className="border-t border-line bg-paper px-4 py-3">
           <AiResult edge={edge} entry={entry} onAnalyze={onAnalyze} />
-          <PromptBox edge={edge} mode={mode} />
+          <PromptBox edge={edge} mode="full" />
         </div>
       )}
     </div>
@@ -264,8 +254,7 @@ export function OpportunitiesPage() {
   const [data, setData] = useState<EdgesResponse | null>(null);
   const [record, setRecord] = useState<RecordSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState<AnalysisMode>("full");
-  const { ai, analyze } = useAiAnalysis(mode);
+  const { ai, analyze } = useAiAnalysis("full");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -350,7 +339,6 @@ export function OpportunitiesPage() {
                 edge={edge}
                 entry={ai[edge.id]}
                 onAnalyze={analyze}
-                mode={mode}
               />
             ))}
           </div>
@@ -394,42 +382,7 @@ export function OpportunitiesPage() {
             );
           })}
         </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-xs text-ink-faint">AI read:</span>
-          <div className="inline-flex items-center rounded-md border border-line-strong bg-card p-0.5">
-            {([
-              { value: "full", label: "Full" },
-              { value: "stats_only", label: "PrizePicks-only" },
-            ] as { value: AnalysisMode; label: string }[]).map((m) => {
-              const active = mode === m.value;
-              return (
-                <button
-                  key={m.value}
-                  onClick={() => setMode(m.value)}
-                  title={
-                    m.value === "stats_only"
-                      ? "Ask Claude using player + matchup form only — no sportsbook data"
-                      : "Ask Claude with the full sharp-book read"
-                  }
-                  className={`rounded px-3 py-1.5 text-sm font-semibold transition-colors ${
-                    active ? "bg-ink text-paper" : "text-ink-soft hover:text-ink"
-                  }`}
-                >
-                  {m.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
       </div>
-
-      {mode === "stats_only" && (
-        <p className="rise rise-3 -mt-2 mb-4 text-xs text-ink-faint">
-          PrizePicks-only mode: Claude judges each play from the player's form and the
-          matchup alone — no sportsbook lines. The stats half of the analysis.
-        </p>
-      )}
 
       <div className="rise rise-3 overflow-hidden rounded-lg border border-line bg-card">
         <div
@@ -463,7 +416,6 @@ export function OpportunitiesPage() {
               edge={edge}
               entry={ai[edge.id]}
               onAnalyze={analyze}
-              mode={mode}
             />
           ))
         )}

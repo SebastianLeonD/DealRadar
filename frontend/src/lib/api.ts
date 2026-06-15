@@ -128,6 +128,11 @@ export interface PpBoardProp {
   player: string;
   team: string | null;
   line: number;
+  position?: string | null;
+  image_url?: string | null;
+  opponent?: string | null;
+  game_id?: string | null;
+  start_time?: string | null;
 }
 
 export interface PpBoardGroup {
@@ -138,9 +143,19 @@ export interface PpBoardGroup {
   props: PpBoardProp[];
 }
 
+export interface PpBoardGame {
+  game_id: string;
+  home: string;
+  away: string;
+  start_time: string | null;
+  status: string | null;
+  count: number;
+}
+
 export interface PpBoardResponse {
   total: number;
   groups: PpBoardGroup[];
+  games: PpBoardGame[];
 }
 
 export interface ActionInfo {
