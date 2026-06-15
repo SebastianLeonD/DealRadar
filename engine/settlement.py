@@ -14,7 +14,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from engine.name_matcher import match_player_name
 from engine.sports import get_sport, sport_for_stat
 from scrapers.results_api import fetch_stats_for_date
-from storage.db_manager import get_record_summary, get_unsettled_edges, settle_edge
+from storage.db_manager import (
+    get_record_summary,
+    get_unsettled_bets,
+    get_unsettled_edges,
+    settle_bet,
+    settle_edge,
+)
 
 # Don't try to settle an edge until the game has plausibly finished.
 SETTLE_AFTER_HOURS = 4
@@ -38,7 +44,9 @@ def candidate_dates(edge: dict) -> list[str]:
     Prefers commence_time; falls back to flagged_at. Includes the previous
     day because late UTC timestamps roll past midnight on US evening games.
     """
-    anchor = _parse_ts(edge.get('commence_time')) or _parse_ts(edge['flagged_at'])
+    anchor = _parse_ts(edge.get('commence_time')) or _parse_ts(
+        edge.get('flagged_at') or edge.get('created_at')
+    )
     if anchor is None:
         return []
     dates = {
@@ -52,8 +60,39 @@ def game_finished(edge: dict, now: datetime) -> bool:
     start = _parse_ts(edge.get('commence_time'))
     if start is not None:
         return now >= start + timedelta(hours=SETTLE_AFTER_HOURS)
-    flagged = _parse_ts(edge['flagged_at'])
-    return flagged is not None and now >= flagged + timedelta(hours=SETTLE_AFTER_HOURS)
+    anchor = _parse_ts(edge.get('flagged_at') or edge.get('created_at'))
+    return anchor is not None and now >= anchor + timedelta(hours=SETTLE_AFTER_HOURS)
+
+
+def resolve_actual(row: dict, stats_cache: dict) -> tuple[float | None, str]:
+    """Look up a play's actual stat from box scores. Returns (value, status)
+    where status is 'ok', 'missing' (no box-score match) or 'unknown' (stat
+    has no box-score source, e.g. a 1H prop)."""
+    sport_key = sport_for_stat(row['stat_type'])
+    if sport_key is None:
+        return None, 'unknown'
+    sport = get_sport(sport_key)
+    espn_stat = sport['espn_stats'].get(row['stat_type'])
+    if espn_stat is None:
+        return None, 'unknown'
+
+    legs = [name.strip() for name in row['dk_player_name'].split(' + ')]
+    for date in candidate_dates(row):
+        cache_key = (sport['espn_path'], date)
+        if cache_key not in stats_cache:
+            stats_cache[cache_key] = fetch_stats_for_date(
+                sport['espn_path'], sport['espn_box_format'], date,
+            )
+        box = stats_cache[cache_key]
+        leg_values = []
+        for leg in legs:  # combo plays sum every leg's actual
+            matched, _ = match_player_name(leg, list(box.keys()))
+            if matched is None or espn_stat not in box[matched]:
+                break
+            leg_values.append(box[matched][espn_stat])
+        if len(leg_values) == len(legs):
+            return sum(leg_values), 'ok'
+    return None, 'missing'
 
 
 def grade(play: str, pp_line: float, actual: float) -> str:
@@ -81,35 +120,10 @@ def settle_edges() -> tuple[int, list[str]]:
     unknown_stat = 0
 
     for edge in pending:
-        sport_key = sport_for_stat(edge['stat_type'])
-        if sport_key is None:
+        actual, status = resolve_actual(edge, stats_cache)
+        if status == 'unknown':
             unknown_stat += 1
             continue
-        sport = get_sport(sport_key)
-        espn_stat = sport['espn_stats'].get(edge['stat_type'])
-        if espn_stat is None:
-            unknown_stat += 1  # e.g. 1H stats — no box-score source to grade
-            continue
-
-        legs = [name.strip() for name in edge['dk_player_name'].split(' + ')]
-        actual = None
-        for date in candidate_dates(edge):
-            cache_key = (sport['espn_path'], date)
-            if cache_key not in stats_cache:
-                stats_cache[cache_key] = fetch_stats_for_date(
-                    sport['espn_path'], sport['espn_box_format'], date,
-                )
-            box = stats_cache[cache_key]
-            leg_values = []
-            for leg in legs:  # combo edges sum every leg's actual
-                matched, _ = match_player_name(leg, list(box.keys()))
-                if matched is None or espn_stat not in box[matched]:
-                    break
-                leg_values.append(box[matched][espn_stat])
-            if len(leg_values) == len(legs):
-                actual = sum(leg_values)
-                break
-
         if actual is None:
             missing += 1
             continue
@@ -127,6 +141,41 @@ def settle_edges() -> tuple[int, list[str]]:
         lines.append(f"  ({unknown_stat} edge(s) skipped: stat not in any sport config)")
 
     lines.insert(0, f"Settled {settled} edge(s); {missing} had no box score match.")
+    return settled, lines
+
+
+def settle_bets() -> tuple[int, list[str]]:
+    """Grade the bets the user actually placed, same box-score path as edges."""
+    now = datetime.now(timezone.utc)
+    pending = [bet for bet in get_unsettled_bets() if game_finished(bet, now)]
+    lines: list[str] = []
+    if not pending:
+        lines.append("No bets ready to settle (none past game time).")
+        return 0, lines
+
+    stats_cache: dict[tuple[str, str], dict[str, dict[str, float]]] = {}
+    settled = missing = unknown_stat = 0
+
+    for bet in pending:
+        actual, status = resolve_actual(bet, stats_cache)
+        if status == 'unknown':
+            unknown_stat += 1
+            continue
+        if actual is None:
+            missing += 1
+            continue
+        result = grade(bet['play'], bet['pp_line'], actual)
+        settle_bet(bet['id'], result, actual)
+        settled += 1
+        stat_label = bet['stat_type'].replace('player_', '')
+        lines.append(
+            f"  {result.ljust(5)} {bet['pp_player_name'].ljust(24)} "
+            f"{bet['play'].ljust(5)} {bet['pp_line']} {stat_label} -> actual {actual:.0f}"
+        )
+
+    if unknown_stat:
+        lines.append(f"  ({unknown_stat} bet(s) can't be graded yet — no box-score source)")
+    lines.insert(0, f"Settled {settled} bet(s); {missing} had no box score match.")
     return settled, lines
 
 

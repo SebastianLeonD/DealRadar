@@ -294,6 +294,66 @@ def get_record():
     return get_record_summary()
 
 
+class TrackBetRequest(AnalyzeRequest):
+    """An edge the user is logging as a placed bet, plus an optional stake."""
+
+    stake: float | None = None
+
+
+@app.post("/api/bets")
+def track_bet(req: TrackBetRequest):
+    from storage.db_manager import add_bet
+
+    payload = req.model_dump()
+    player = payload.get("player") or payload.get("dk_player_name")
+    if not player or payload.get("stat_type") is None or payload.get("pp_line") is None:
+        return {"ok": False, "error": "Missing player, stat, or line."}
+
+    bet = {
+        "pp_player_name": player,
+        "dk_player_name": payload.get("dk_player_name") or player,
+        "team": payload.get("team"),
+        "opponent": payload.get("opponent"),
+        "stat_type": payload["stat_type"],
+        "play": payload.get("play") or "OVER",
+        "pp_line": payload["pp_line"],
+        "dk_line": payload.get("dk_line"),
+        "win_prob": payload.get("win_prob"),
+        "ev_percent": payload.get("ev_percent"),
+        "verdict": payload.get("verdict"),
+        "edge_type": payload.get("edge_type"),
+        "book_count": payload.get("book_count"),
+        "commence_time": payload.get("commence_time"),
+        "stake": payload.get("stake"),
+    }
+    bet_id = add_bet(bet)
+    if bet_id is None:
+        return {"ok": True, "duplicate": True}
+    return {"ok": True, "id": bet_id}
+
+
+@app.get("/api/bets")
+def list_bets():
+    from storage.db_manager import get_bet_record_summary, get_bets
+
+    return {"bets": get_bets(), "summary": get_bet_record_summary()}
+
+
+@app.post("/api/bets/settle")
+def settle_my_bets():
+    from engine.settlement import settle_bets
+
+    settled, report = settle_bets()
+    return {"success": True, "settled": settled, "output": "\n".join(report)}
+
+
+@app.delete("/api/bets/{bet_id}")
+def remove_bet(bet_id: int):
+    from storage.db_manager import delete_bet
+
+    return {"ok": delete_bet(bet_id)}
+
+
 @app.get("/api/edges")
 def get_edges(
     stat: str = Query("All"),

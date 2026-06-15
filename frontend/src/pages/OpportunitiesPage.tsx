@@ -1,6 +1,8 @@
 import {
   AlertTriangle,
   ArrowRightLeft,
+  BookmarkPlus,
+  Check,
   ChevronDown,
   Download,
   Loader2,
@@ -93,6 +95,53 @@ function LineSource({ edge }: { edge: Edge }) {
       books say <span className="tnum">{edge.dk_line}</span>
       {edge.book_count ? ` · ${edge.book_count} book${edge.book_count > 1 ? "s" : ""}` : ""}
     </p>
+  );
+}
+
+/** Logs a pick as a bet you actually placed. */
+function TrackBetButton({ edge, compact = false }: { edge: Edge; compact?: boolean }) {
+  const [state, setState] = useState<"idle" | "saving" | "done">("idle");
+
+  const track = async () => {
+    setState("saving");
+    try {
+      await api.trackBet(edge);
+      setState("done");
+    } catch {
+      setState("idle");
+    }
+  };
+
+  const done = state === "done";
+  if (compact) {
+    return (
+      <button
+        onClick={track}
+        disabled={state !== "idle"}
+        title={done ? "Tracked in My Bets" : "Track this bet"}
+        className={`rounded-md border p-1.5 transition-colors ${
+          done
+            ? "border-bet/40 bg-bet-soft text-bet"
+            : "border-line-strong bg-card text-ink-soft hover:border-ink hover:text-ink"
+        }`}
+      >
+        {done ? <Check size={13} /> : <BookmarkPlus size={13} />}
+      </button>
+    );
+  }
+  return (
+    <button
+      onClick={track}
+      disabled={state !== "idle"}
+      className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors ${
+        done
+          ? "border-bet/40 bg-bet-soft text-bet"
+          : "border-line-strong bg-card text-ink-soft hover:border-ink hover:text-ink"
+      }`}
+    >
+      {done ? <Check size={13} /> : <BookmarkPlus size={13} />}
+      {done ? "Tracked" : "Track bet"}
+    </button>
   );
 }
 
@@ -206,9 +255,12 @@ function StrongPickCard({
       )}
 
       <div className="mt-3 border-t border-line bg-paper px-5 py-4">
-        <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
-          <Sparkles size={12} />
-          Claude's read
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
+            <Sparkles size={12} />
+            Claude's read
+          </div>
+          <TrackBetButton edge={edge} />
         </div>
         <AiResult edge={edge} entry={entry} onAnalyze={onAnalyze} />
         <PromptBox edge={edge} mode="full" />
@@ -290,7 +342,8 @@ function BoardRow({
           )}
         </div>
 
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-1.5">
+          <TrackBetButton edge={edge} compact />
           <button
             onClick={() => setOpen((v) => !v)}
             className="inline-flex items-center gap-1 rounded-md border border-line-strong bg-card px-2 py-1 text-xs font-semibold text-ink-soft transition-colors hover:border-ink hover:text-ink"

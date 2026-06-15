@@ -1,4 +1,4 @@
-export type Page = "execution" | "opportunities" | "prizepicks" | "clv" | "help";
+export type Page = "execution" | "opportunities" | "prizepicks" | "bets" | "clv" | "help";
 
 /** "full" weighs the sharp books; "stats_only" is a PrizePicks-only, form-based read. */
 export type AnalysisMode = "full" | "stats_only";
@@ -182,6 +182,44 @@ export interface PpBoardResponse {
   games: PpBoardGame[];
 }
 
+export interface Bet {
+  id: number;
+  created_at: string;
+  pp_player_name: string;
+  dk_player_name: string;
+  team: string | null;
+  opponent: string | null;
+  stat_type: string;
+  play: "OVER" | "UNDER";
+  pp_line: number;
+  dk_line: number | null;
+  win_prob: number | null;
+  ev_percent: number | null;
+  verdict: "YES" | "LEAN" | "NO" | null;
+  edge_type: string | null;
+  book_count: number | null;
+  commence_time: string | null;
+  stake: number | null;
+  result: "WIN" | "LOSS" | "PUSH" | null;
+  actual_value: number | null;
+}
+
+export interface BetSummary {
+  total: number;
+  settled: number;
+  wins: number;
+  losses: number;
+  pushes: number;
+  hit_rate: number | null;
+  total_staked: number;
+  by_verdict: Record<string, { wins: number; losses: number; pushes: number }>;
+}
+
+export interface BetsResponse {
+  bets: Bet[];
+  summary: BetSummary;
+}
+
 export interface ActionInfo {
   title: string;
   command: string;
@@ -218,6 +256,19 @@ export const api = {
   settleResults: () =>
     request<PipelineResult>("/pipeline/settle", { method: "POST" }),
   getRecord: () => request<RecordSummary>("/record"),
+  trackBet: (edge: Edge, stake?: number) =>
+    request<{ ok: boolean; id?: number; duplicate?: boolean; error?: string }>("/bets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...edge, stake: stake ?? null }),
+    }),
+  getBets: () => request<BetsResponse>("/bets"),
+  settleBets: () =>
+    request<{ success: boolean; settled: number; output: string }>("/bets/settle", {
+      method: "POST",
+    }),
+  removeBet: (id: number) =>
+    request<{ ok: boolean }>(`/bets/${id}`, { method: "DELETE" }),
   getPrizePicksBoard: () => request<PpBoardResponse>("/prizepicks/board"),
   getEdges: (stat: string, edgeType: string) =>
     request<EdgesResponse>(
