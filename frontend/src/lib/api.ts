@@ -124,6 +124,18 @@ export interface PromptResponse {
   sent: SentToAi;
 }
 
+export interface PpUnderdog {
+  ud_line: number;
+  ud_delta: number;
+  over_app: "UD" | "PP" | "EVEN";
+  under_app: "UD" | "PP" | "EVEN";
+  ud_higher_price: string | null;
+  ud_lower_price: string | null;
+  ud_higher_multiplier: number | null;
+  ud_lower_multiplier: number | null;
+  ud_matched_name: string;
+}
+
 export interface PpBoardProp {
   player: string;
   team: string | null;
@@ -133,6 +145,7 @@ export interface PpBoardProp {
   opponent?: string | null;
   game_id?: string | null;
   start_time?: string | null;
+  underdog?: PpUnderdog | null;
 }
 
 export interface PpBoardGroup {
@@ -185,6 +198,8 @@ export const api = {
     request<PipelineResult>("/pipeline/parse-pp", { method: "POST" }),
   fetchForm: () =>
     request<PipelineResult>("/pipeline/fetch-form", { method: "POST" }),
+  fetchUnderdog: () =>
+    request<PipelineResult>("/pipeline/fetch-underdog", { method: "POST" }),
   runMatcher: () =>
     request<PipelineResult>("/pipeline/run-matcher", { method: "POST" }),
   runFull: () =>

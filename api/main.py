@@ -111,6 +111,12 @@ def pipeline_fetch_form():
     return {"success": wc_ok and club_ok, "output": output or "Form stats updated."}
 
 
+@app.post("/api/pipeline/fetch-underdog")
+def pipeline_fetch_underdog():
+    success, output = run_script("scrapers/underdog_api.py")
+    return {"success": success, "output": output or "Underdog board updated."}
+
+
 @app.post("/api/pipeline/settle")
 def pipeline_settle():
     success, output = run_script("engine/settlement.py")
@@ -196,6 +202,7 @@ def get_prizepicks_board():
     import json
     from collections import Counter, defaultdict
 
+    from engine import line_shop
     from engine.projections import FORM_FIELD_BY_STAT
 
     board_file = PROJECT_ROOT / "data" / "processed" / "pp_board.json"
@@ -203,6 +210,9 @@ def get_prizepicks_board():
         return {"total": 0, "groups": [], "games": []}
     with board_file.open() as file:
         props = json.load(file)
+
+    # Underdog line-shop: attach UD's line for the same player + stat.
+    ud_index = line_shop.build_index(line_shop.load_underdog())
 
     def has_form(mapped: str | None) -> bool:
         if not mapped:
@@ -216,6 +226,13 @@ def get_prizepicks_board():
         g = grouped[prop["stat_type"]]
         g["mapped_stat"] = prop.get("mapped_stat")
         g["has_form_data"] = has_form(prop.get("mapped_stat"))
+        ud = line_shop.match_prop(
+            prop["name"],
+            line_shop.normalize(prop["name"]),
+            line_shop.pp_join_key(prop.get("mapped_stat"), prop["stat_type"]),
+            prop["line"],
+            ud_index,
+        )
         g["props"].append(
             {
                 "player": prop["name"],
@@ -226,6 +243,7 @@ def get_prizepicks_board():
                 "opponent": prop.get("opponent"),
                 "game_id": prop.get("game_id"),
                 "start_time": prop.get("start_time"),
+                "underdog": ud,
             }
         )
 

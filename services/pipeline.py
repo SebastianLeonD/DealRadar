@@ -59,6 +59,18 @@ ACTION_CATALOG = {
         "api_calls": "None billed — FBref is free (web scrape)",
         "writes_to": "data/processed/fbref_wc_stats.json, fbref_wc_teams.json",
     },
+    "fetch_underdog": {
+        "title": "Update Underdog Lines",
+        "command": "python3 scrapers/underdog_api.py",
+        "description": (
+            "Fetches Underdog Fantasy's open pick'em board directly (no key, no "
+            "paste — unlike PrizePicks), filters to FIFA player props, and maps "
+            "each to the engine's stat keys. The PrizePicks Board tab then shows "
+            "Underdog's line beside each PP prop so you can shop the softer side."
+        ),
+        "api_calls": "None billed — Underdog's lines endpoint is public JSON",
+        "writes_to": "data/processed/underdog_data.json",
+    },
     "run_matcher": {
         "title": "Run Edge Detection",
         "command": "python3 engine/matcher.py",

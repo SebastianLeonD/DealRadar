@@ -7,6 +7,7 @@ type ActionKey =
   | "fetch_sharp"
   | "parse_pp"
   | "fetch_form"
+  | "fetch_underdog"
   | "run_matcher"
   | "run_full"
   | "settle_results";
@@ -30,6 +31,11 @@ const STEPS: {
     key: "fetch_form",
     title: "Update World Cup form (optional)",
     body: "Pulls each World Cup player's tournament stats from FBref to price stats no book posts (saves, fouls, tackles, crosses). Free; slow on first run. Re-run after each matchday.",
+  },
+  {
+    key: "fetch_underdog",
+    title: "Update Underdog lines (optional)",
+    body: "Pulls Underdog Fantasy's board directly (free, no paste) and shows its line next to each PrizePicks prop on the PrizePicks Board tab — so you can take the softer side. Re-run close to kickoff.",
   },
   {
     key: "run_matcher",
@@ -85,6 +91,9 @@ export function ExecutionPage() {
           break;
         case "fetch_form":
           result = await api.fetchForm();
+          break;
+        case "fetch_underdog":
+          result = await api.fetchUnderdog();
           break;
         case "run_matcher":
           result = await api.runMatcher();

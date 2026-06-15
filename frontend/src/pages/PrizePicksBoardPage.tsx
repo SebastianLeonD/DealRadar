@@ -7,6 +7,7 @@ import {
   type PpBoardGroup,
   type PpBoardProp,
   type PpBoardResponse,
+  type PpUnderdog,
 } from "../lib/api";
 import { Badge, EmptyState, PageHeader, statLabel } from "../components/ui";
 import { AiResult, PromptBox, useAiAnalysis } from "../components/ai";
@@ -79,6 +80,51 @@ function GameSquare({
   );
 }
 
+const APP_NAME: Record<PpUnderdog["over_app"], string> = {
+  UD: "Underdog",
+  PP: "PrizePicks",
+  EVEN: "either",
+};
+
+/* ---------- Underdog line-shop strip ---------- */
+
+function UnderdogStrip({ ud }: { ud: PpUnderdog }) {
+  if (ud.ud_delta === 0) {
+    return (
+      <div className="mt-2 flex items-center justify-between rounded-md border border-line bg-paper px-2.5 py-1.5 text-[11px] text-ink-faint">
+        <span>Underdog · same line</span>
+        {ud.ud_higher_multiplier != null && ud.ud_lower_multiplier != null && (
+          <span className="tnum">
+            ×{ud.ud_higher_multiplier} / ×{ud.ud_lower_multiplier}
+          </span>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="mt-2 rounded-md border border-bet/30 bg-bet-soft/40 px-2.5 py-1.5 text-[11px]">
+      <div className="flex items-center justify-between">
+        <span className="text-ink-faint">Underdog line</span>
+        <span className="font-semibold text-ink">
+          <span className="tnum">{ud.ud_line}</span>{" "}
+          <span className="tnum text-ink-faint">
+            ({ud.ud_delta > 0 ? "+" : ""}
+            {ud.ud_delta})
+          </span>
+        </span>
+      </div>
+      <div className="mt-1 flex gap-3 text-ink-faint">
+        <span>
+          Over → <span className="font-semibold text-ink">{APP_NAME[ud.over_app]}</span>
+        </span>
+        <span>
+          Under → <span className="font-semibold text-ink">{APP_NAME[ud.under_app]}</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- a single prop, in a PrizePicks-style box ---------- */
 
 function PlayerCard({
@@ -125,6 +171,8 @@ function PlayerCard({
         <span className="text-xs text-ink-soft">{groupLabel(group)}</span>
       </div>
 
+      {prop.underdog && <UnderdogStrip ud={prop.underdog} />}
+
       <div className="mt-2">
         <AiResult edge={edge} entry={ai[edge.id]} onAnalyze={analyze} />
         <PromptBox edge={edge} mode="stats_only" />
@@ -138,6 +186,7 @@ export function PrizePicksBoardPage() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [selectedGame, setSelectedGame] = useState<string | null>(null);
+  const [gapsOnly, setGapsOnly] = useState(false);
   const { ai, analyze } = useAiAnalysis("stats_only");
 
   useEffect(() => {
@@ -159,13 +208,22 @@ export function PrizePicksBoardPage() {
   const groups = data?.groups ?? [];
 
   // Keep original prop indices stable for the AI map even when a game is picked.
+  const gapCount = groups.reduce(
+    (n, g) => n + g.props.filter((p) => p.underdog && p.underdog.ud_delta !== 0).length,
+    0,
+  );
+
   const groupsView = groups
     .map((group, ogi) => ({
       group,
       ogi,
       props: group.props
         .map((prop, pi) => ({ prop, pi }))
-        .filter(({ prop }) => !selectedGame || prop.game_id === selectedGame),
+        .filter(
+          ({ prop }) =>
+            (!selectedGame || prop.game_id === selectedGame) &&
+            (!gapsOnly || (prop.underdog != null && prop.underdog.ud_delta !== 0)),
+        ),
     }))
     .filter(({ props }) => props.length > 0);
 
@@ -206,6 +264,29 @@ export function PrizePicksBoardPage() {
         </div>
       )}
 
+      <div className="rise rise-1 mb-6 flex flex-wrap items-center gap-3">
+        {gapCount > 0 && (
+          <button
+            onClick={() => setGapsOnly((v) => !v)}
+            className={`rounded-md border px-3 py-1.5 text-sm font-semibold transition-colors ${
+              gapsOnly
+                ? "border-ink bg-ink text-paper"
+                : "border-line-strong bg-card text-ink-soft hover:border-ink hover:text-ink"
+            }`}
+          >
+            Underdog gaps only
+            <span className={`tnum ml-1.5 text-xs ${gapsOnly ? "text-paper/70" : "text-ink-faint"}`}>
+              {gapCount}
+            </span>
+          </button>
+        )}
+        <p className="text-xs leading-relaxed text-ink-faint">
+          Where <span className="font-semibold text-ink-soft">Underdog</span> posts a different
+          line, take Over on the lower line, Under on the higher — even a 0.5 gap settles
+          differently (PrizePicks whole-number lines push on a tie; Underdog half-lines don't).
+        </p>
+      </div>
+
       <p className="rise rise-1 mb-6 text-xs leading-relaxed text-ink-faint">
         The <span className="font-semibold text-ink-soft">form data</span> tag means we have
         this player's tournament numbers for that stat, so Claude reasons from real rates.
@@ -218,15 +299,17 @@ export function PrizePicksBoardPage() {
       ) : !groupsView.length ? (
         <EmptyState
           message={
-            groups.length
-              ? "No props for that game. Clear the filter to see the rest of the board."
-              : "No PrizePicks board parsed. Go to Update Data and read your PrizePicks board."
+            !groups.length
+              ? "No PrizePicks board parsed. Go to Update Data and read your PrizePicks board."
+              : gapsOnly
+                ? "No Underdog line gaps right now. Turn off the filter to see the full board."
+                : "No props for that game. Clear the filter to see the rest of the board."
           }
         />
       ) : (
         <div className="rise rise-2 space-y-3">
           {groupsView.map(({ group, props, ogi }) => {
-            const isOpen = open.has(group.stat_type);
+            const isOpen = open.has(group.stat_type) || gapsOnly;
             return (
               <div
                 key={group.stat_type}
