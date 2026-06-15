@@ -23,9 +23,25 @@ import subprocess
 
 AI_BACKEND = os.getenv("AI_BACKEND", "auto")
 AI_CLI_BINARY = os.getenv("AI_CLI_BINARY", "claude")
-AI_CLI_MODEL = os.getenv("AI_CLI_MODEL", "opus")
+# Model by analysis mode: opus for real picks (full), haiku for the cheap,
+# high-volume PrizePicks-board reads (stats_only). All overridable via .env.
+AI_CLI_MODEL = os.getenv("AI_CLI_MODEL", "opus")              # full / default
+AI_CLI_MODEL_STATS = os.getenv("AI_CLI_MODEL_STATS", "haiku")  # stats_only
 AI_SDK_MODEL = os.getenv("AI_MODEL", "claude-opus-4-8")
+AI_SDK_MODEL_STATS = os.getenv("AI_MODEL_STATS", "claude-haiku-4-5-20251001")
 AI_MAX_TOKENS = int(os.getenv("AI_MAX_TOKENS", "16000"))
+
+
+def _cli_model_for(mode: str) -> str:
+    if mode == "stats_only":
+        return os.getenv("AI_CLI_MODEL_STATS", AI_CLI_MODEL_STATS)
+    return os.getenv("AI_CLI_MODEL", AI_CLI_MODEL)
+
+
+def _sdk_model_for(mode: str) -> str:
+    if mode == "stats_only":
+        return os.getenv("AI_MODEL_STATS", AI_SDK_MODEL_STATS)
+    return os.getenv("AI_MODEL", AI_SDK_MODEL)
 
 SYSTEM_PROMPT = (
     "You are a sharp sports-betting analyst reviewing a single PrizePicks player "
@@ -335,7 +351,7 @@ def cli_available() -> bool:
 def _analyze_via_cli(ctx: dict, runner=None) -> dict:
     runner = runner or subprocess.run
     binary = os.getenv("AI_CLI_BINARY", AI_CLI_BINARY)
-    model = os.getenv("AI_CLI_MODEL", AI_CLI_MODEL)
+    model = _cli_model_for(ctx.get("mode", "full"))
     prompt = f"{format_prompt(ctx)}\n\n{_JSON_INSTRUCTION}"
     cmd = [
         binary, "-p", prompt,
@@ -380,7 +396,7 @@ def _analyze_via_sdk(ctx: dict) -> dict:
 
     client = anthropic.Anthropic()
     message = client.messages.create(
-        model=AI_SDK_MODEL,
+        model=_sdk_model_for(ctx.get("mode", "full")),
         max_tokens=AI_MAX_TOKENS,
         system=_system_for(ctx.get("mode", "full")),
         messages=[{"role": "user", "content": f"{format_prompt(ctx)}\n\n{_JSON_INSTRUCTION}"}],

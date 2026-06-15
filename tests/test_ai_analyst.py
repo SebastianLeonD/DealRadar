@@ -159,3 +159,21 @@ def test_cli_failure_surfaces_envelope_message():
 
 def test_cli_available_returns_bool():
     assert isinstance(ai_analyst.cli_available(), bool)
+
+
+def test_cli_model_splits_by_mode():
+    # Picks (full) get opus; the high-volume board (stats_only) gets haiku.
+    def capture(store):
+        def run(cmd, **kwargs):
+            store["model"] = cmd[cmd.index("--model") + 1]
+            envelope = {"result": json.dumps(
+                {"pick": "PASS", "confidence": 50, "reasoning": "r", "key_factors": []}
+            )}
+            return types.SimpleNamespace(returncode=0, stdout=json.dumps(envelope), stderr="")
+        return run
+
+    full, stats = {}, {}
+    analyze_play(_edge(), backend="cli", mode="full", runner=capture(full))
+    analyze_play(_edge(), backend="cli", mode="stats_only", runner=capture(stats))
+    assert full["model"] == "opus"
+    assert stats["model"] == "haiku"
