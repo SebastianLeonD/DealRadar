@@ -1,4 +1,4 @@
-export type Page = "execution" | "prizepicks" | "bets" | "clv" | "help";
+export type Page = "execution" | "prizepicks" | "slip" | "bets" | "clv" | "help";
 
 /** "full" weighs the sharp books; "stats_only" is a PrizePicks-only, form-based read. */
 export type AnalysisMode = "full" | "stats_only";
@@ -196,6 +196,47 @@ export interface PpBoardResponse {
   games: PpBoardGame[];
 }
 
+export interface SlipLeg {
+  player: string;
+  team: string | null;
+  opponent: string | null;
+  game: string | null;
+  stat_type: string;
+  side: "OVER" | "UNDER";
+  provider: "PP" | "UD";
+  line: number | null;
+  pp_line: number | null;
+  ud_line: number | null;
+  win_prob: number | null;
+  ev_percent: number | null;
+  verdict: "YES" | "LEAN" | "NO" | null;
+  edge_type: string | null;
+  ai: {
+    pick: "OVER" | "UNDER" | "PASS";
+    confidence: number | null;
+    reasoning: string | null;
+    key_factors: string[];
+  };
+}
+
+export interface Slip {
+  provider: "PP" | "UD";
+  metric: "ev" | "win";
+  requested: number;
+  eligible: number;
+  considered: number;
+  agreed: number;
+  legs: SlipLeg[];
+  short: boolean;
+  correlations: { game: string; players: string[] }[];
+}
+
+export interface SlipResponse {
+  ok: boolean;
+  error?: string;
+  slip: Slip;
+}
+
 export interface Bet {
   id: number;
   created_at: string;
@@ -284,6 +325,12 @@ export const api = {
   removeBet: (id: number) =>
     request<{ ok: boolean }>(`/bets/${id}`, { method: "DELETE" }),
   getPrizePicksBoard: () => request<PpBoardResponse>("/prizepicks/board"),
+  buildSlip: (n: number, provider: "PP" | "UD", metric: "ev" | "win") =>
+    request<SlipResponse>("/slip/build", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ n, provider, metric }),
+    }),
   getEdges: (stat: string, edgeType: string) =>
     request<EdgesResponse>(
       `/edges?stat=${encodeURIComponent(stat)}&edge_type=${encodeURIComponent(edgeType)}`,

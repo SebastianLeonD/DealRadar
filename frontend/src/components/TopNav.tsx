@@ -7,6 +7,7 @@ interface TopNavProps {
 
 const tabs: { id: Page; label: string }[] = [
   { id: "prizepicks", label: "The Board" },
+  { id: "slip", label: "Build a Slip" },
   { id: "bets", label: "My Bets" },
   { id: "execution", label: "Update Data" },
   { id: "clv", label: "Results" },

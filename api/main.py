@@ -195,6 +195,58 @@ def analyze_edge(req: AnalyzeRequest):
         return {"ok": False, "error": str(error), "opponent": edge.get("opponent"), "sent": sent}
 
 
+class SlipRequest(BaseModel):
+    """Build me the best N-leg slip on this provider, ranked by this metric."""
+
+    n: int = 3
+    provider: str = "PP"  # "PP" (PrizePicks) | "UD" (Underdog)
+    metric: str = "ev"    # "ev" | "win"
+
+
+@app.post("/api/slip/build")
+def build_slip_endpoint(req: SlipRequest):
+    """Engine proposes, Claude disposes: the best N legs both back, or fewer.
+
+    The engine ranks its liked picks; Claude reviews the top candidates in
+    parallel and only legs it agrees with survive. No padding to hit N.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from engine import slip_builder
+    from engine.ai_analyst import analyze_play
+
+    frame = load_edges_dataframe("All", "All")
+    edges = frame.to_dict(orient="records") if not frame.empty else []
+    _attach_underdog(edges)
+    for edge in edges:
+        _with_matchup(edge)  # fill game/opponent so Claude knows the matchup
+
+    errors: list[str] = []
+
+    def analyze_shortlist(items):
+        def one(edge):
+            try:
+                return analyze_play(edge, mode="full")
+            except Exception as error:  # one bad leg shouldn't sink the slip
+                errors.append(str(error))
+                return None
+
+        if not items:
+            return []
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            return list(pool.map(one, items))
+
+    slip = slip_builder.build_slip(
+        edges, req.n, provider=req.provider, metric=req.metric,
+        analyze_shortlist=analyze_shortlist,
+    )
+    # If nothing survived AND every Claude call failed, that's an error, not an
+    # empty board — surface it so the UI can explain (e.g. CLI not logged in).
+    if not slip["legs"] and errors and len(errors) >= slip["considered"] > 0:
+        return {"ok": False, "error": errors[0], "slip": slip}
+    return {"ok": True, "slip": slip}
+
+
 @app.get("/api/prizepicks/board")
 def get_prizepicks_board():
     """Every PrizePicks prop you pasted, grouped by stat type — the full menu,
