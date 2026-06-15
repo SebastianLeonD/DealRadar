@@ -232,6 +232,15 @@ def get_prizepicks_board():
     # Underdog line-shop: attach UD's line for the same player + stat.
     ud_index = line_shop.build_index(line_shop.load_underdog())
 
+    # Engine overlay: the priced picks (verdict/win%/EV) keyed by player+stat+line,
+    # so a board prop the engine likes shows its verdict right on the card.
+    edge_index: dict[tuple, dict] = {}
+    edges_frame = load_edges_dataframe("All", "All")
+    if not edges_frame.empty:
+        for e in edges_frame.to_dict(orient="records"):
+            key = (line_shop.normalize(e.get("player") or ""), e.get("stat_type"), e.get("pp_line"))
+            edge_index[key] = e
+
     def has_form(mapped: str | None) -> bool:
         if not mapped:
             return False
@@ -251,6 +260,21 @@ def get_prizepicks_board():
             prop["line"],
             ud_index,
         )
+        edge = edge_index.get(
+            (line_shop.normalize(prop["name"]), prop.get("mapped_stat"), prop["line"])
+        )
+        engine = None
+        if edge:
+            engine = {
+                "verdict": edge.get("verdict"),
+                "play": edge.get("play"),
+                "win_prob": edge.get("win_prob"),
+                "ev_percent": edge.get("ev_percent"),
+                "edge_type": edge.get("edge_type"),
+                "book_count": edge.get("book_count"),
+                "dk_line": edge.get("dk_line"),
+                "flags": edge.get("flags"),
+            }
         g["props"].append(
             {
                 "player": prop["name"],
@@ -262,6 +286,7 @@ def get_prizepicks_board():
                 "game_id": prop.get("game_id"),
                 "start_time": prop.get("start_time"),
                 "underdog": ud,
+                "engine": engine,
             }
         )
 

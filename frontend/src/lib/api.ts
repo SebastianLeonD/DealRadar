@@ -1,4 +1,4 @@
-export type Page = "execution" | "opportunities" | "prizepicks" | "bets" | "clv" | "help";
+export type Page = "execution" | "prizepicks" | "bets" | "clv" | "help";
 
 /** "full" weighs the sharp books; "stats_only" is a PrizePicks-only, form-based read. */
 export type AnalysisMode = "full" | "stats_only";
@@ -147,6 +147,17 @@ export interface PpUnderdog {
   ud_matched_name: string;
 }
 
+export interface PpEngine {
+  verdict: "YES" | "LEAN" | "NO" | null;
+  play: "OVER" | "UNDER" | null;
+  win_prob: number | null;
+  ev_percent: number | null;
+  edge_type: string | null;
+  book_count: number | null;
+  dk_line: number | null;
+  flags: string | null;
+}
+
 export interface PpBoardProp {
   player: string;
   team: string | null;
@@ -157,6 +168,7 @@ export interface PpBoardProp {
   game_id?: string | null;
   start_time?: string | null;
   underdog?: PpUnderdog | null;
+  engine?: PpEngine | null;
 }
 
 export interface PpBoardGroup {

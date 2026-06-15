@@ -1,4 +1,4 @@
-import { ChevronDown, Swords } from "lucide-react";
+import { AlertTriangle, BookmarkPlus, Check, ChevronDown, Swords } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   api,
@@ -6,16 +6,26 @@ import {
   type PpBoardGame,
   type PpBoardGroup,
   type PpBoardProp,
-  type PpBoardResponse,
+  type PpEngine,
   type PpUnderdog,
+  type RecordSummary,
 } from "../lib/api";
-import { Badge, EmptyState, PageHeader, SearchBox, statLabel } from "../components/ui";
-import { AiResult, PromptBox, useAiAnalysis } from "../components/ai";
+import {
+  Badge,
+  EmptyState,
+  MetricCard,
+  PageHeader,
+  SearchBox,
+  statLabel,
+  verdictWord,
+  WinBar,
+} from "../components/ui";
+import { AiResult, type AiEntry, PromptBox, useAiAnalysis } from "../components/ai";
 
-/** Build an Edge-shaped object for the stats-only AI call. For mapped stats we
- *  send the engine key (so the analyst finds the player's form); for unmapped
- *  ones we send the raw PrizePicks name so it at least knows the stat. */
+/** An Edge-shaped object for the AI call + bet tracking. Priced props carry the
+ *  engine's read; plain props send just enough for a stats-only read. */
 function toEdge(group: PpBoardGroup, prop: PpBoardProp, id: number): Edge {
+  const e = prop.engine;
   return {
     id,
     player: prop.player,
@@ -24,6 +34,14 @@ function toEdge(group: PpBoardGroup, prop: PpBoardProp, id: number): Edge {
     opponent: prop.opponent ?? null,
     stat_type: group.mapped_stat ?? group.stat_type,
     pp_line: prop.line,
+    play: e?.play ?? "OVER",
+    win_prob: e?.win_prob ?? null,
+    ev_percent: e?.ev_percent ?? null,
+    verdict: e?.verdict ?? null,
+    edge_type: e?.edge_type ?? null,
+    book_count: e?.book_count ?? null,
+    dk_line: e?.dk_line ?? null,
+    commence_time: prop.start_time ?? null,
   } as unknown as Edge;
 }
 
@@ -35,49 +53,14 @@ function kickoff(iso: string | null | undefined): string {
   if (!iso) return "";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString([], {
-    weekday: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return date.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
 }
 
-/* ---------- a matchup square at the top of the board ---------- */
-
-function GameSquare({
-  game,
-  active,
-  onClick,
-}: {
-  game: PpBoardGame;
-  active: boolean;
-  onClick: () => void;
-}) {
-  const live = (game.status ?? "").toLowerCase().includes("progress");
-  return (
-    <button
-      onClick={onClick}
-      className={`flex flex-col gap-1.5 rounded-lg border px-3 py-3 text-left transition-colors ${
-        active
-          ? "border-ink bg-ink text-paper"
-          : "border-line bg-card hover:border-line-strong"
-      }`}
-    >
-      <div className="flex items-center gap-1.5 text-sm font-semibold leading-tight">
-        <span className="truncate">{game.away}</span>
-        <Swords size={11} className="shrink-0 opacity-60" />
-        <span className="truncate">{game.home}</span>
-      </div>
-      <div
-        className={`flex items-center gap-2 text-[11px] ${
-          active ? "text-paper/70" : "text-ink-faint"
-        }`}
-      >
-        <span>{live ? "Live now" : kickoff(game.start_time)}</span>
-        <span className="tnum">· {game.count} props</span>
-      </div>
-    </button>
-  );
+function verdictVariant(verdict: PpEngine["verdict"]): "bet" | "maybe" | "skip" | "neutral" {
+  if (verdict === "YES") return "bet";
+  if (verdict === "LEAN") return "maybe";
+  if (verdict === "NO") return "skip";
+  return "neutral";
 }
 
 const APP_NAME: Record<PpUnderdog["over_app"], string> = {
@@ -85,6 +68,36 @@ const APP_NAME: Record<PpUnderdog["over_app"], string> = {
   PP: "PrizePicks",
   EVEN: "either",
 };
+
+/* ---------- track bet ---------- */
+
+function TrackBetButton({ edge }: { edge: Edge }) {
+  const [state, setState] = useState<"idle" | "saving" | "done">("idle");
+  const track = async () => {
+    setState("saving");
+    try {
+      await api.trackBet(edge);
+      setState("done");
+    } catch {
+      setState("idle");
+    }
+  };
+  const done = state === "done";
+  return (
+    <button
+      onClick={track}
+      disabled={state !== "idle"}
+      className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors ${
+        done
+          ? "border-bet/40 bg-bet-soft text-bet"
+          : "border-line-strong bg-card text-ink-soft hover:border-ink hover:text-ink"
+      }`}
+    >
+      {done ? <Check size={13} /> : <BookmarkPlus size={13} />}
+      {done ? "Tracked" : "Track bet"}
+    </button>
+  );
+}
 
 /* ---------- Underdog line-shop strip ---------- */
 
@@ -125,24 +138,31 @@ function UnderdogStrip({ ud }: { ud: PpUnderdog }) {
   );
 }
 
-/* ---------- a single prop, in a PrizePicks-style box ---------- */
+/* ---------- a single prop, PrizePicks-style box ---------- */
 
 function PlayerCard({
   group,
   prop,
   id,
-  ai,
-  analyze,
+  entry,
+  onAnalyze,
+  mode,
 }: {
   group: PpBoardGroup;
   prop: PpBoardProp;
   id: number;
-  ai: ReturnType<typeof useAiAnalysis>["ai"];
-  analyze: ReturnType<typeof useAiAnalysis>["analyze"];
+  entry: AiEntry | undefined;
+  onAnalyze: (edge: Edge) => void;
+  mode: "full" | "stats_only";
 }) {
   const edge = toEdge(group, prop, id);
+  const e = prop.engine;
   return (
-    <div className="flex flex-col rounded-lg border border-line bg-card p-3">
+    <div
+      className={`flex flex-col rounded-lg border bg-card p-3 ${
+        e?.verdict === "YES" ? "border-bet/40" : "border-line"
+      }`}
+    >
       <div className="flex items-start gap-2.5">
         {prop.image_url ? (
           <img
@@ -150,7 +170,7 @@ function PlayerCard({
             alt=""
             loading="lazy"
             className="h-11 w-11 shrink-0 rounded-full bg-paper object-cover"
-            onError={(e) => (e.currentTarget.style.display = "none")}
+            onError={(ev) => (ev.currentTarget.style.display = "none")}
           />
         ) : null}
         <div className="min-w-0 flex-1">
@@ -164,38 +184,129 @@ function PlayerCard({
             </p>
           )}
         </div>
+        {e && <Badge variant={verdictVariant(e.verdict)}>{verdictWord(e.verdict)}</Badge>}
       </div>
 
-      <div className="mt-2.5 flex items-baseline gap-1.5 border-t border-line pt-2.5">
-        <span className="tnum text-lg font-semibold text-ink">{prop.line}</span>
-        <span className="text-xs text-ink-soft">{groupLabel(group)}</span>
+      <div className="mt-2.5 border-t border-line pt-2.5">
+        {e ? (
+          <>
+            <p className="text-sm font-semibold text-ink">
+              {e.play === "OVER" ? "Over" : "Under"} <span className="tnum">{prop.line}</span>{" "}
+              {groupLabel(group)}
+            </p>
+            <div className="mt-2 flex items-center gap-4">
+              {e.win_prob != null && (
+                <div>
+                  <p className="tnum text-sm font-semibold text-ink">
+                    {(e.win_prob * 100).toFixed(1)}%
+                  </p>
+                  <WinBar prob={e.win_prob} />
+                  <p className="mt-1 text-[10px] uppercase tracking-wide text-ink-faint">
+                    win chance
+                  </p>
+                </div>
+              )}
+              {e.ev_percent != null && (
+                <div>
+                  <p className="tnum text-sm font-semibold text-ink">
+                    {e.ev_percent >= 0 ? "+" : ""}
+                    {e.ev_percent.toFixed(1)}%
+                  </p>
+                  <p className="mt-1 text-[10px] uppercase tracking-wide text-ink-faint">edge</p>
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="flex items-baseline gap-1.5">
+            <span className="tnum text-lg font-semibold text-ink">{prop.line}</span>
+            <span className="text-xs text-ink-soft">{groupLabel(group)}</span>
+          </div>
+        )}
       </div>
+
+      {e?.flags && (
+        <div className="mt-2 flex items-start gap-1.5 rounded-md border border-maybe/25 bg-maybe-soft px-2.5 py-1.5">
+          <AlertTriangle size={12} className="mt-0.5 shrink-0 text-maybe" />
+          <p className="text-[11px] leading-relaxed text-maybe">{e.flags}</p>
+        </div>
+      )}
 
       {prop.underdog && <UnderdogStrip ud={prop.underdog} />}
 
-      <div className="mt-2">
-        <AiResult edge={edge} entry={ai[edge.id]} onAnalyze={analyze} />
-        <PromptBox edge={edge} mode="stats_only" />
+      <div className="mt-2 space-y-2">
+        {e && <TrackBetButton edge={edge} />}
+        <div>
+          <AiResult edge={edge} entry={entry} onAnalyze={onAnalyze} />
+          <PromptBox edge={edge} mode={mode} />
+        </div>
       </div>
     </div>
   );
 }
 
+/* ---------- a matchup square ---------- */
+
+function GameSquare({
+  game,
+  active,
+  onClick,
+}: {
+  game: PpBoardGame;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const live = (game.status ?? "").toLowerCase().includes("progress");
+  return (
+    <button
+      onClick={onClick}
+      className={`flex flex-col gap-1.5 rounded-lg border px-3 py-3 text-left transition-colors ${
+        active ? "border-ink bg-ink text-paper" : "border-line bg-card hover:border-line-strong"
+      }`}
+    >
+      <div className="flex items-center gap-1.5 text-sm font-semibold leading-tight">
+        <span className="truncate">{game.away}</span>
+        <Swords size={11} className="shrink-0 opacity-60" />
+        <span className="truncate">{game.home}</span>
+      </div>
+      <div className={`flex items-center gap-2 text-[11px] ${active ? "text-paper/70" : "text-ink-faint"}`}>
+        <span>{live ? "Live now" : kickoff(game.start_time)}</span>
+        <span className="tnum">· {game.count} props</span>
+      </div>
+    </button>
+  );
+}
+
+const VERDICTS: { value: "All" | "YES" | "LEAN"; label: string }[] = [
+  { value: "All", label: "All" },
+  { value: "YES", label: "Yes" },
+  { value: "LEAN", label: "Maybe" },
+];
+
 export function PrizePicksBoardPage() {
-  const [data, setData] = useState<PpBoardResponse | null>(null);
+  const [data, setData] = useState<{
+    groups: PpBoardGroup[];
+    games: PpBoardGame[];
+  } | null>(null);
+  const [record, setRecord] = useState<RecordSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [selectedGame, setSelectedGame] = useState<string | null>(null);
   const [gapsOnly, setGapsOnly] = useState(false);
+  const [picksOnly, setPicksOnly] = useState(false);
+  const [verdict, setVerdict] = useState<"All" | "YES" | "LEAN">("All");
   const [query, setQuery] = useState("");
-  const { ai, analyze } = useAiAnalysis("stats_only");
+
+  const fullAi = useAiAnalysis("full");
+  const statsAi = useAiAnalysis("stats_only");
 
   useEffect(() => {
     api
       .getPrizePicksBoard()
-      .then(setData)
-      .catch(() => setData({ total: 0, groups: [], games: [] }))
+      .then((d) => setData({ groups: d.groups, games: d.games }))
+      .catch(() => setData({ groups: [], games: [] }))
       .finally(() => setLoading(false));
+    api.getRecord().then(setRecord).catch(() => {});
   }, []);
 
   const toggle = (stat: string) =>
@@ -207,14 +318,13 @@ export function PrizePicksBoardPage() {
 
   const games = data?.games ?? [];
   const groups = data?.groups ?? [];
-
-  // Keep original prop indices stable for the AI map even when a game is picked.
-  const gapCount = groups.reduce(
-    (n, g) => n + g.props.filter((p) => p.underdog && p.underdog.ud_delta !== 0).length,
-    0,
-  );
-
   const q = query.trim().toLowerCase();
+
+  const allProps = groups.flatMap((g) => g.props);
+  const pricedCount = allProps.filter((p) => p.engine).length;
+  const yesCount = allProps.filter((p) => p.engine?.verdict === "YES").length;
+  const gapCount = allProps.filter((p) => p.underdog && p.underdog.ud_delta !== 0).length;
+
   const groupsView = groups
     .map((group, ogi) => ({
       group,
@@ -225,6 +335,8 @@ export function PrizePicksBoardPage() {
           ({ prop }) =>
             (!selectedGame || prop.game_id === selectedGame) &&
             (!gapsOnly || (prop.underdog != null && prop.underdog.ud_delta !== 0)) &&
+            (!picksOnly || prop.engine != null) &&
+            (!picksOnly || verdict === "All" || prop.engine?.verdict === verdict) &&
             (!q ||
               prop.player.toLowerCase().includes(q) ||
               (prop.team ?? "").toLowerCase().includes(q)),
@@ -235,9 +347,30 @@ export function PrizePicksBoardPage() {
   return (
     <div>
       <PageHeader
-        title="PrizePicks Board"
-        subtitle="Every prop on your pasted PrizePicks board, including stats no sportsbook offers. Pick a game up top, then ask Claude for a stats-only read on any player — no bookmaker data, just the player's form and the matchup."
+        title="The Board"
+        subtitle="Every prop on your PrizePicks board, all in one place. Picks the engine likes show a verdict, win chance and edge; the rest get a stats-only read. Underdog's line sits on each card, and you can track what you bet."
       />
+
+      {record && !loading && (
+        <div className="rise rise-1 mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <MetricCard label="Bet-worthy" value={yesCount} hint="verdict: YES" />
+          <MetricCard label="Engine picks" value={pricedCount} hint="priced, above break-even" />
+          <MetricCard
+            label="Record"
+            value={
+              record.settled
+                ? `${record.wins}–${record.losses}${record.pushes ? `–${record.pushes}` : ""}`
+                : "—"
+            }
+            hint="wins–losses–pushes"
+          />
+          <MetricCard
+            label="Hit rate"
+            value={record.hit_rate != null ? `${record.hit_rate}%` : "—"}
+            hint="needs 54.25% to profit"
+          />
+        </div>
+      )}
 
       <div className="rise rise-1 mb-6 w-full sm:max-w-xs">
         <SearchBox value={query} onChange={setQuery} />
@@ -273,7 +406,22 @@ export function PrizePicksBoardPage() {
         </div>
       )}
 
-      <div className="rise rise-1 mb-6 flex flex-wrap items-center gap-3">
+      <div className="rise rise-1 mb-6 flex flex-wrap items-center gap-2">
+        {pricedCount > 0 && (
+          <button
+            onClick={() => setPicksOnly((v) => !v)}
+            className={`rounded-md border px-3 py-1.5 text-sm font-semibold transition-colors ${
+              picksOnly
+                ? "border-ink bg-ink text-paper"
+                : "border-line-strong bg-card text-ink-soft hover:border-ink hover:text-ink"
+            }`}
+          >
+            Engine picks only
+            <span className={`tnum ml-1.5 text-xs ${picksOnly ? "text-paper/70" : "text-ink-faint"}`}>
+              {pricedCount}
+            </span>
+          </button>
+        )}
         {gapCount > 0 && (
           <button
             onClick={() => setGapsOnly((v) => !v)}
@@ -289,22 +437,42 @@ export function PrizePicksBoardPage() {
             </span>
           </button>
         )}
-        <p className="text-xs leading-relaxed text-ink-faint">
-          Where <span className="font-semibold text-ink-soft">Underdog</span> posts a different
-          line, take Over on the lower line, Under on the higher — even a 0.5 gap settles
-          differently (PrizePicks whole-number lines push on a tie; Underdog half-lines don't).
-        </p>
+        {picksOnly && (
+          <div className="inline-flex items-center rounded-md border border-line-strong bg-card p-0.5">
+            {VERDICTS.map((v) => {
+              const active = verdict === v.value;
+              const count =
+                v.value === "All"
+                  ? pricedCount
+                  : allProps.filter((p) => p.engine?.verdict === v.value).length;
+              return (
+                <button
+                  key={v.value}
+                  onClick={() => setVerdict(v.value)}
+                  className={`rounded px-3 py-1.5 text-sm font-semibold transition-colors ${
+                    active ? "bg-ink text-paper" : "text-ink-soft hover:text-ink"
+                  }`}
+                >
+                  {v.label}
+                  <span className={`tnum ml-1.5 text-xs ${active ? "text-paper/70" : "text-ink-faint"}`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <p className="rise rise-1 mb-6 text-xs leading-relaxed text-ink-faint">
-        The <span className="font-semibold text-ink-soft">form data</span> tag means we have
-        this player's tournament numbers for that stat, so Claude reasons from real rates.
-        Stats marked <span className="font-semibold text-ink-soft">no stats yet</span> (passes,
-        dribbles, fantasy score, clearances) have no feed — Claude can only give a general read.
+        Cards with a verdict are the engine's picks (priced against the books / Underdog). Where
+        <span className="font-semibold text-ink-soft"> Underdog</span> posts a different line, take
+        Over on the lower line, Under on the higher. Stats with no feed (passes, dribbles, fantasy
+        score) get a general Claude read only.
       </p>
 
       {loading ? (
-        <EmptyState message="Loading the PrizePicks board..." />
+        <EmptyState message="Loading the board..." />
       ) : !groupsView.length ? (
         <EmptyState
           message={
@@ -312,15 +480,17 @@ export function PrizePicksBoardPage() {
               ? "No PrizePicks board parsed. Go to Update Data and read your PrizePicks board."
               : q
                 ? `No props match “${query}”.`
-                : gapsOnly
-                  ? "No Underdog line gaps right now. Turn off the filter to see the full board."
-                  : "No props for that game. Clear the filter to see the rest of the board."
+                : picksOnly
+                  ? "No engine picks match these filters."
+                  : gapsOnly
+                    ? "No Underdog line gaps right now."
+                    : "No props for that game. Clear the filter to see the rest of the board."
           }
         />
       ) : (
         <div className="rise rise-2 space-y-3">
           {groupsView.map(({ group, props, ogi }) => {
-            const isOpen = open.has(group.stat_type) || gapsOnly || !!q;
+            const isOpen = open.has(group.stat_type) || gapsOnly || picksOnly || !!q;
             return (
               <div
                 key={group.stat_type}
@@ -347,16 +517,21 @@ export function PrizePicksBoardPage() {
 
                 {isOpen && (
                   <div className="grid grid-cols-1 gap-3 border-t border-line p-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {props.map(({ prop, pi }) => (
-                      <PlayerCard
-                        key={pi}
-                        group={group}
-                        prop={prop}
-                        id={ogi * 1000 + pi}
-                        ai={ai}
-                        analyze={analyze}
-                      />
-                    ))}
+                    {props.map(({ prop, pi }) => {
+                      const id = ogi * 1000 + pi;
+                      const priced = !!prop.engine;
+                      return (
+                        <PlayerCard
+                          key={pi}
+                          group={group}
+                          prop={prop}
+                          id={id}
+                          entry={priced ? fullAi.ai[id] : statsAi.ai[id]}
+                          onAnalyze={priced ? fullAi.analyze : statsAi.analyze}
+                          mode={priced ? "full" : "stats_only"}
+                        />
+                      );
+                    })}
                   </div>
                 )}
               </div>
