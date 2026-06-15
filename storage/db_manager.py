@@ -6,6 +6,8 @@ from pathlib import Path
 DB_PATH = Path('data/arb_engine.db')
 DK_STAGING_FILE = Path('data/processed/draftkings_data.json')
 PP_STAGING_FILE = Path('data/processed/live.json')
+# Underdog's de-vigged board, same shape as DK — ingested as another book.
+UD_STAGING_FILE = Path('data/processed/underdog_sharp.json')
 
 TABLES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS props (
@@ -245,12 +247,16 @@ def ingest_staging(
     db_path: Path = DB_PATH,
     dk_path: Path = DK_STAGING_FILE,
     pp_path: Path = PP_STAGING_FILE,
+    ud_path: Path = UD_STAGING_FILE,
 ) -> dict[str, int]:
     init_db(db_path)
     results = {}
 
     if dk_path.exists():
         results['dk'] = ingest_draftkings(dk_path, db_path)
+    if ud_path.exists():
+        # Same loader/shape as DK; records carry Bookmaker='underdog'.
+        results['underdog'] = ingest_draftkings(ud_path, db_path)
     if pp_path.exists():
         results['pp'] = ingest_prizepicks(pp_path, db_path)
 

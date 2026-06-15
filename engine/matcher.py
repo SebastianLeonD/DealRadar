@@ -43,6 +43,12 @@ STALE_GAP_MINUTES = 45      # PP capture older than sharp capture by this much
 BOOK_DISAGREEMENT = 0.07    # max spread in P(over) between books
 LARGE_LINE_GAP = 2.5        # PP vs closest sharp line, in points
 
+# Pick'em apps, not sharp sportsbooks: usable to price stats the books ignore,
+# but a play sourced ONLY from these is soft — flag it so the verdict caps at
+# LEAN (no soft-only play is ever a confident YES).
+SOFT_BOOKS = {"underdog"}
+SOFT_ONLY_FLAG = "Priced off Underdog (a pick'em app, not a sharp book) — soft line"
+
 
 def _parse_ts(value: str | None) -> datetime | None:
     if not value:
@@ -125,6 +131,8 @@ def evaluate_player(
     flags = build_trap_flags(pp_player, latest_capture, line_gap, spread, injury)
     if extra_flags:
         flags = extra_flags + flags
+    if set(book_probs) <= SOFT_BOOKS:
+        flags = [SOFT_ONLY_FLAG] + flags
     verdict = assign_verdict(win_prob, flags)
 
     return {
@@ -202,6 +210,8 @@ def evaluate_combo(
     flags.append('Combo: correlation between legs not modeled')
     if spread > BOOK_DISAGREEMENT:
         flags.append(f'Books disagree by {spread * 100:.0f}% — market unsettled')
+    if set(book_probs) <= SOFT_BOOKS:
+        flags.append(SOFT_ONLY_FLAG)
 
     evaluation = {
         'play': play,
@@ -248,6 +258,10 @@ def price_model_edges(sport: dict, flagged_bets: list[dict]) -> bool:
     priced = False
 
     for stat_type in model_stats:
+        # If a market now prices this stat (e.g. Underdog), use it — don't
+        # double-log a weaker form-model play for the same prop.
+        if get_sharp_ladders(stat_type):
+            continue
         pp_data = get_latest_props('PP', stat_type)
         if not pp_data:
             continue

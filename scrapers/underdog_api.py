@@ -26,9 +26,14 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from engine.probability import devig_power
+
 LINES_URL = "https://api.underdogfantasy.com/beta/v6/over_under_lines"
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 OUTPUT_FILE = Path("data/processed/underdog_data.json")
+# Sharp-shaped board (de-vigged true probabilities) the matcher prices against,
+# the same format as draftkings_data.json — Underdog enters as another book.
+SHARP_FILE = Path("data/processed/underdog_sharp.json")
 
 SPORT_ID = "FIFA"
 
@@ -181,6 +186,39 @@ def build_board(raw: dict) -> list[dict]:
     return board, skipped
 
 
+def _american(value) -> float | None:
+    try:
+        return float(str(value).replace("+", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def build_sharp_board(board: list[dict]) -> list[dict]:
+    """De-vig each mapped prop's two-sided price into a sharp-shaped record.
+
+    Only props that carry an engine stat key (mapped) and both american prices
+    can be priced; label-only stats (passes, goals+assists) have no model."""
+    records = []
+    for prop in board:
+        if not prop.get("mapped"):
+            continue
+        higher, lower = _american(prop.get("higher_price")), _american(prop.get("lower_price"))
+        if higher is None or lower is None:
+            continue
+        true_over, true_under = devig_power(higher, lower)
+        records.append({
+            "Player": prop["player"],
+            "Game": f"{prop.get('opponent') or '?'} @ {prop.get('team') or '?'}",
+            "Stat": prop["join_key"],
+            "Line": prop["line"],
+            "Bookmaker": "underdog",
+            "Commence_Time": prop.get("commence_time"),
+            "True_Over_Prob": round(true_over * 100, 2),
+            "True_Under_Prob": round(true_under * 100, 2),
+        })
+    return records
+
+
 def main():
     print("Fetching Underdog over/under lines...")
     raw = fetch_board()
@@ -190,10 +228,15 @@ def main():
     with OUTPUT_FILE.open("w") as file:
         json.dump(board, file, indent=4, ensure_ascii=False)
 
+    sharp = build_sharp_board(board)
+    with SHARP_FILE.open("w") as file:
+        json.dump(sharp, file, indent=4, ensure_ascii=False)
+
     priced = sum(1 for prop in board if prop["mapped"])
     print(f"Kept {len(board)} FIFA props ({priced} priced, "
           f"{len(board) - priced} label-only); {skipped} unsupported stats skipped.")
     print(f"Saved Underdog board to {OUTPUT_FILE}")
+    print(f"Saved {len(sharp)} de-vigged lines (for pricing) to {SHARP_FILE}")
 
 
 if __name__ == "__main__":
