@@ -103,3 +103,43 @@ def match_prop(
     if ud is None:
         return None
     return compare(pp_line, ud)
+
+
+def recommend_for_play(play: str, pp_line: float, ud: dict) -> dict:
+    """Compare for a prop the engine has already picked a SIDE on.
+
+    best_app is the app to bet the engine's side with (the app whose line is
+    softer for that direction); bet_on_underdog is the actionable case.
+    """
+    cmp = compare(pp_line, ud)
+    side = (play or "").upper()
+    if side == "OVER":
+        best, price, mult = cmp["over_app"], cmp["ud_higher_price"], cmp["ud_higher_multiplier"]
+    elif side == "UNDER":
+        best, price, mult = cmp["under_app"], cmp["ud_lower_price"], cmp["ud_lower_multiplier"]
+    else:
+        best, price, mult = "EVEN", None, None
+    return {
+        "ud_line": cmp["ud_line"],
+        "ud_delta": cmp["ud_delta"],
+        "best_app": best,
+        "bet_on_underdog": best == "UD",
+        "play_price": price,
+        "play_multiplier": mult,
+        "ud_matched_name": cmp["ud_matched_name"],
+    }
+
+
+def match_edge(
+    play: str,
+    player: str,
+    normalized: str,
+    join_key: str,
+    pp_line: float,
+    index: dict[str, list[dict]],
+) -> dict | None:
+    """Underdog recommendation for one engine edge. None if no UD match."""
+    ud = _find(player, normalized, index.get(join_key, []))
+    if ud is None:
+        return None
+    return recommend_for_play(play, pp_line, ud)

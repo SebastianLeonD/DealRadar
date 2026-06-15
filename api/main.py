@@ -298,8 +298,11 @@ def get_edges(
     ev_count = int((frame["edge_type"] == "+EV Odds Juice").sum())
     yes_count = int((frame["verdict"] == "YES").sum())
 
+    edges = frame.to_dict(orient="records")
+    _attach_underdog(edges)
+
     return {
-        "edges": frame.to_dict(orient="records"),
+        "edges": edges,
         "summary": {
             "unique": len(frame),
             "line_discrepancy": line_count,
@@ -308,6 +311,30 @@ def get_edges(
             "stats": stats,
         },
     }
+
+
+def _attach_underdog(edges: list[dict]) -> None:
+    """Add Underdog's line + which app to bet the engine's side on, per edge.
+
+    Edges are engine-keyed, so the stat_type is itself the join key (a _1h key
+    only matches UD first-half props — never a full-match line)."""
+    from engine import line_shop
+
+    index = line_shop.build_index(line_shop.load_underdog())
+    for edge in edges:
+        player = edge.get("player") or edge.get("dk_player_name") or ""
+        pp_line = edge.get("pp_line")
+        if not player or pp_line is None:
+            edge["underdog"] = None
+            continue
+        edge["underdog"] = line_shop.match_edge(
+            edge.get("play", ""),
+            player,
+            line_shop.normalize(player),
+            edge.get("stat_type", ""),
+            pp_line,
+            index,
+        )
 
 
 @app.get("/api/edges/export")

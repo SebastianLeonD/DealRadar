@@ -90,3 +90,26 @@ def test_duration_mismatch_never_joins():
     # PP first-half prop must not match Underdog's full-match shots line.
     assert line_shop.match_prop("Alexander Isak", "alexander isak",
                                 "player_shots_1h", 1.5, INDEX) is None
+
+
+# --- directional recommendation for an engine edge ---
+
+def test_over_edge_routes_to_underdog_when_its_line_is_lower():
+    # Engine likes OVER 3.0; Underdog's 2.5 is the softer over → bet UD.
+    rec = line_shop.match_edge("OVER", "Alexander Isak", "alexander isak",
+                               "player_shots", 3.0, INDEX)
+    assert rec["best_app"] == "UD" and rec["bet_on_underdog"] is True
+    assert rec["play_price"] == "+110"  # the 'higher' side price on UD
+
+
+def test_under_edge_prefers_prizepicks_when_underdog_line_is_lower():
+    # Engine likes UNDER 3.0; UD's lower 2.5 is worse for the under → stay on PP.
+    rec = line_shop.match_edge("UNDER", "Alexander Isak", "alexander isak",
+                               "player_shots", 3.0, INDEX)
+    assert rec["best_app"] == "PP" and rec["bet_on_underdog"] is False
+
+
+def test_equal_line_edge_is_even():
+    rec = line_shop.match_edge("OVER", "Kylian Mbappé", "kylian mbappe",
+                               "player_shots", 3.5, INDEX)
+    assert rec["best_app"] == "EVEN" and rec["bet_on_underdog"] is False

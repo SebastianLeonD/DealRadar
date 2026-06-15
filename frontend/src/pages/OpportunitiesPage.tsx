@@ -1,4 +1,12 @@
-import { AlertTriangle, ChevronDown, Download, Loader2, Sparkles, Swords } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRightLeft,
+  ChevronDown,
+  Download,
+  Loader2,
+  Sparkles,
+  Swords,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api, type Edge, type EdgesResponse, type RecordSummary } from "../lib/api";
 import {
@@ -59,6 +67,35 @@ function LineSource({ edge }: { edge: Edge }) {
   );
 }
 
+/** Where to bet the engine's chosen side: Underdog when its line is softer. */
+function UnderdogPick({ edge }: { edge: Edge }) {
+  const ud = edge.underdog;
+  if (!ud) return null;
+  const side = edge.play === "OVER" ? "Over" : "Under";
+
+  if (ud.bet_on_underdog) {
+    return (
+      <div className="mt-2 flex items-start gap-2 rounded-md border border-bet/30 bg-bet-soft/50 px-3 py-2">
+        <ArrowRightLeft size={14} className="mt-0.5 shrink-0 text-bet" />
+        <p className="text-xs leading-relaxed text-ink">
+          Bet the {side} on <span className="font-semibold">Underdog</span> — softer line at{" "}
+          <span className="tnum font-semibold">{ud.ud_line}</span> vs PrizePicks'{" "}
+          <span className="tnum">{edge.pp_line}</span>
+          {ud.play_price ? <span className="text-ink-faint"> ({ud.play_price})</span> : null}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <p className="mt-2 flex items-center gap-1.5 text-xs text-ink-faint">
+      <ArrowRightLeft size={12} className="shrink-0" />
+      {ud.best_app === "EVEN"
+        ? `Underdog has the same line (${ud.ud_line}) — bet either.`
+        : `PrizePicks has the better ${side.toLowerCase()} line (Underdog ${ud.ud_line}).`}
+    </p>
+  );
+}
+
 /* ---------- featured card for a play the engine likes ---------- */
 
 function StrongPickCard({
@@ -104,6 +141,7 @@ function StrongPickCard({
           <span className="tnum">{edge.pp_line}</span> {statLabel(edge.stat_type)}
         </p>
         <LineSource edge={edge} />
+        <UnderdogPick edge={edge} />
       </div>
 
       <div className="mt-3 flex items-center gap-5 px-5">
@@ -213,6 +251,7 @@ function BoardRow({
           <div className="flex flex-wrap items-center gap-1">
             <Badge variant={verdictVariant(edge.verdict)}>{word}</Badge>
             {isModeled(edge) && <Badge variant="info">modeled</Badge>}
+            {edge.underdog?.bet_on_underdog && <Badge variant="bet">UD line</Badge>}
           </div>
           {edge.ev_percent != null && (
             <p className="tnum mt-1 text-xs text-ink-faint">
@@ -240,6 +279,7 @@ function BoardRow({
 
       {open && (
         <div className="border-t border-line bg-paper px-4 py-3">
+          <UnderdogPick edge={edge} />
           <AiResult edge={edge} entry={entry} onAnalyze={onAnalyze} />
           <PromptBox edge={edge} mode="full" />
         </div>

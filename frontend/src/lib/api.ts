@@ -16,6 +16,16 @@ export interface FeedsResponse {
   pp_raw_exists: boolean;
 }
 
+export interface EdgeUnderdog {
+  ud_line: number;
+  ud_delta: number;
+  best_app: "UD" | "PP" | "EVEN";
+  bet_on_underdog: boolean;
+  play_price: string | null;
+  play_multiplier: number | null;
+  ud_matched_name: string;
+}
+
 export interface Edge {
   id: number;
   flagged_at: string;
@@ -40,6 +50,7 @@ export interface Edge {
   book_count: number | null;
   result: "WIN" | "LOSS" | "PUSH" | null;
   actual_value: number | null;
+  underdog?: EdgeUnderdog | null;
 }
 
 export interface EdgesResponse {
