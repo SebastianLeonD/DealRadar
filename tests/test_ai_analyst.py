@@ -135,7 +135,25 @@ def test_analyze_via_cli_raises_on_failure():
     def fake_runner(cmd, **kwargs):
         return types.SimpleNamespace(returncode=1, stdout="", stderr="not logged in")
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="not logged in"):
+        analyze_play(_edge(), backend="cli", runner=fake_runner)
+
+
+def test_extract_tolerates_unescaped_control_chars():
+    # Models sometimes leave a literal newline inside the reasoning string.
+    rec = extract_recommendation(
+        '{"pick":"OVER","confidence":70,"reasoning":"line one\nline two","key_factors":["a"]}'
+    )
+    assert rec["pick"] == "OVER" and "line two" in rec["reasoning"]
+
+
+def test_cli_failure_surfaces_envelope_message():
+    # A usage limit comes back as returncode 1 with the reason in result, not stderr.
+    def fake_runner(cmd, **kwargs):
+        envelope = {"type": "result", "result": "You've hit your Opus limit · resets Jun 18"}
+        return types.SimpleNamespace(returncode=1, stdout=json.dumps(envelope), stderr="")
+
+    with pytest.raises(RuntimeError, match="Opus limit"):
         analyze_play(_edge(), backend="cli", runner=fake_runner)
 
 

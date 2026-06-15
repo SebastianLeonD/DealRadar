@@ -344,17 +344,22 @@ def _analyze_via_cli(ctx: dict, runner=None) -> dict:
         "--append-system-prompt", _system_for(ctx.get("mode", "full")),
     ]
     result = runner(cmd, capture_output=True, text=True, timeout=240)
-    if getattr(result, "returncode", 0) != 0:
-        raise RuntimeError(
-            f"`{binary}` CLI failed (exit {result.returncode}). "
-            f"{(result.stderr or '').strip()[:300]}"
-        )
     stdout = (result.stdout or "").strip()
+    stderr = (result.stderr or "").strip()
+
+    # The CLI returns a JSON envelope; on errors (e.g. a usage limit) the human
+    # reason lives in its "result" field, not stderr — pull it out either way.
+    text = stdout
     try:
         envelope = json.loads(stdout)
-        text = envelope.get("result", stdout) if isinstance(envelope, dict) else stdout
+        if isinstance(envelope, dict):
+            text = envelope.get("result") or envelope.get("error") or stdout
     except json.JSONDecodeError:
-        text = stdout
+        pass
+
+    if getattr(result, "returncode", 0) != 0:
+        detail = (text or stderr or f"exit {result.returncode}").strip()
+        raise RuntimeError(f"Claude CLI error: {detail[:300]}")
     return extract_recommendation(text)
 
 
@@ -395,7 +400,9 @@ def _first_json_object(text: str) -> dict:
         text = text.strip("`")
         if text.lower().startswith("json"):
             text = text[4:]
-    decoder = json.JSONDecoder()
+    # strict=False tolerates literal newlines/tabs the model sometimes leaves
+    # unescaped inside the "reasoning" string, which would else break parsing.
+    decoder = json.JSONDecoder(strict=False)
     index = 0
     while True:
         start = text.find("{", index)
