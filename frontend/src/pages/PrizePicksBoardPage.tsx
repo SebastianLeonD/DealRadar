@@ -345,6 +345,19 @@ const VERDICTS: { value: "All" | "YES" | "LEAN"; label: string }[] = [
   { value: "LEAN", label: "Maybe" },
 ];
 
+const SORTS: { value: "ev" | "win"; label: string }[] = [
+  { value: "ev", label: "Edge" },
+  { value: "win", label: "Win %" },
+];
+
+/** The value a card is ranked by. Unpriced props have no read, so they sink. */
+function metricOf(prop: PpBoardProp, sortBy: "ev" | "win"): number {
+  const e = prop.engine;
+  if (!e) return -Infinity;
+  const v = sortBy === "ev" ? e.ev_percent : e.win_prob;
+  return v ?? -Infinity;
+}
+
 export function PrizePicksBoardPage() {
   const [data, setData] = useState<{
     groups: PpBoardGroup[];
@@ -357,6 +370,7 @@ export function PrizePicksBoardPage() {
   const [gapsOnly, setGapsOnly] = useState(false);
   const [picksOnly, setPicksOnly] = useState(false);
   const [verdict, setVerdict] = useState<"All" | "YES" | "LEAN">("All");
+  const [sortBy, setSortBy] = useState<"ev" | "win">("ev");
   const [query, setQuery] = useState("");
 
   const fullAi = useAiAnalysis("full");
@@ -402,9 +416,13 @@ export function PrizePicksBoardPage() {
             (!q ||
               prop.player.toLowerCase().includes(q) ||
               (prop.team ?? "").toLowerCase().includes(q)),
-        ),
+        )
+        // strongest card first; unpriced props fall to the bottom
+        .sort((a, b) => metricOf(b.prop, sortBy) - metricOf(a.prop, sortBy)),
     }))
-    .filter(({ props }) => props.length > 0);
+    .filter(({ props }) => props.length > 0)
+    // float the group with the strongest card to the top
+    .sort((a, b) => metricOf(b.props[0].prop, sortBy) - metricOf(a.props[0].prop, sortBy));
 
   return (
     <div>
@@ -522,6 +540,29 @@ export function PrizePicksBoardPage() {
                 </button>
               );
             })}
+          </div>
+        )}
+        {pricedCount > 0 && (
+          <div className="ml-auto inline-flex items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
+              Sort
+            </span>
+            <div className="inline-flex items-center rounded-md border border-line-strong bg-card p-0.5">
+              {SORTS.map((s) => {
+                const active = sortBy === s.value;
+                return (
+                  <button
+                    key={s.value}
+                    onClick={() => setSortBy(s.value)}
+                    className={`rounded px-3 py-1.5 text-sm font-semibold transition-colors ${
+                      active ? "bg-ink text-paper" : "text-ink-soft hover:text-ink"
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
