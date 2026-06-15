@@ -9,7 +9,7 @@ import {
   type PpBoardResponse,
   type PpUnderdog,
 } from "../lib/api";
-import { Badge, EmptyState, PageHeader, statLabel } from "../components/ui";
+import { Badge, EmptyState, PageHeader, SearchBox, statLabel } from "../components/ui";
 import { AiResult, PromptBox, useAiAnalysis } from "../components/ai";
 
 /** Build an Edge-shaped object for the stats-only AI call. For mapped stats we
@@ -187,6 +187,7 @@ export function PrizePicksBoardPage() {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [selectedGame, setSelectedGame] = useState<string | null>(null);
   const [gapsOnly, setGapsOnly] = useState(false);
+  const [query, setQuery] = useState("");
   const { ai, analyze } = useAiAnalysis("stats_only");
 
   useEffect(() => {
@@ -213,6 +214,7 @@ export function PrizePicksBoardPage() {
     0,
   );
 
+  const q = query.trim().toLowerCase();
   const groupsView = groups
     .map((group, ogi) => ({
       group,
@@ -222,7 +224,10 @@ export function PrizePicksBoardPage() {
         .filter(
           ({ prop }) =>
             (!selectedGame || prop.game_id === selectedGame) &&
-            (!gapsOnly || (prop.underdog != null && prop.underdog.ud_delta !== 0)),
+            (!gapsOnly || (prop.underdog != null && prop.underdog.ud_delta !== 0)) &&
+            (!q ||
+              prop.player.toLowerCase().includes(q) ||
+              (prop.team ?? "").toLowerCase().includes(q)),
         ),
     }))
     .filter(({ props }) => props.length > 0);
@@ -233,6 +238,10 @@ export function PrizePicksBoardPage() {
         title="PrizePicks Board"
         subtitle="Every prop on your pasted PrizePicks board, including stats no sportsbook offers. Pick a game up top, then ask Claude for a stats-only read on any player — no bookmaker data, just the player's form and the matchup."
       />
+
+      <div className="rise rise-1 mb-6 w-full sm:max-w-xs">
+        <SearchBox value={query} onChange={setQuery} />
+      </div>
 
       {games.length > 0 && (
         <div className="rise rise-1 mb-6">
@@ -301,15 +310,17 @@ export function PrizePicksBoardPage() {
           message={
             !groups.length
               ? "No PrizePicks board parsed. Go to Update Data and read your PrizePicks board."
-              : gapsOnly
-                ? "No Underdog line gaps right now. Turn off the filter to see the full board."
-                : "No props for that game. Clear the filter to see the rest of the board."
+              : q
+                ? `No props match “${query}”.`
+                : gapsOnly
+                  ? "No Underdog line gaps right now. Turn off the filter to see the full board."
+                  : "No props for that game. Clear the filter to see the rest of the board."
           }
         />
       ) : (
         <div className="rise rise-2 space-y-3">
           {groupsView.map(({ group, props, ogi }) => {
-            const isOpen = open.has(group.stat_type) || gapsOnly;
+            const isOpen = open.has(group.stat_type) || gapsOnly || !!q;
             return (
               <div
                 key={group.stat_type}

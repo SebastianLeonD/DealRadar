@@ -1,7 +1,7 @@
 import { CheckCircle2, Loader2, Swords, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api, type Bet, type BetsResponse } from "../lib/api";
-import { Badge, EmptyState, MetricCard, PageHeader, statLabel } from "../components/ui";
+import { Badge, EmptyState, MetricCard, PageHeader, SearchBox, statLabel } from "../components/ui";
 
 function kickoff(iso: string | null): string {
   if (!iso) return "";
@@ -92,6 +92,7 @@ export function MyBetsPage() {
   const [loading, setLoading] = useState(true);
   const [settling, setSettling] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -132,10 +133,18 @@ export function MyBetsPage() {
     await load();
   };
 
-  const bets = data?.bets ?? [];
   const summary = data?.summary;
+  const q = query.trim().toLowerCase();
+  const bets = (data?.bets ?? []).filter(
+    (b) =>
+      !q ||
+      b.pp_player_name.toLowerCase().includes(q) ||
+      (b.team ?? "").toLowerCase().includes(q) ||
+      statLabel(b.stat_type).toLowerCase().includes(q),
+  );
   const open = bets.filter((b) => b.result == null);
   const settled = bets.filter((b) => b.result != null);
+  const totalOpen = summary ? summary.total - summary.settled : 0;
   const rates = summary ? verdictHitRates(summary) : [];
 
   return (
@@ -146,7 +155,7 @@ export function MyBetsPage() {
         action={
           <button
             onClick={settle}
-            disabled={settling || !open.length}
+            disabled={settling || !totalOpen}
             className="inline-flex items-center gap-2 rounded-md border border-line-strong bg-card px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-ink disabled:opacity-40"
           >
             {settling ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
@@ -157,7 +166,7 @@ export function MyBetsPage() {
 
       {summary && !loading && (
         <div className="rise rise-1 mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">
-          <MetricCard label="Bets tracked" value={summary.total} hint={`${open.length} still open`} />
+          <MetricCard label="Bets tracked" value={summary.total} hint={`${totalOpen} still open`} />
           <MetricCard label="Settled" value={summary.settled} hint="graded vs box scores" />
           <MetricCard
             label="Record"
@@ -203,10 +212,22 @@ export function MyBetsPage() {
 
       {note && <p className="rise mb-4 text-sm text-ink-soft">{note}</p>}
 
+      {(data?.bets.length ?? 0) > 0 && (
+        <div className="rise mb-4 w-full sm:max-w-xs">
+          <SearchBox value={query} onChange={setQuery} />
+        </div>
+      )}
+
       {loading ? (
         <EmptyState message="Loading your bets..." />
       ) : !bets.length ? (
-        <EmptyState message="No bets tracked yet. Hit “Track bet” on any pick to log it here." />
+        <EmptyState
+          message={
+            q
+              ? `No bets match “${query}”.`
+              : "No bets tracked yet. Hit “Track bet” on any pick to log it here."
+          }
+        />
       ) : (
         <div className="rise rise-3 space-y-8">
           {open.length > 0 && (

@@ -16,6 +16,7 @@ import {
   EmptyState,
   MetricCard,
   PageHeader,
+  SearchBox,
   statLabel,
   verdictWord,
   WinBar,
@@ -373,6 +374,7 @@ function BoardRow({
 export function OpportunitiesPage() {
   const [stat, setStat] = useState("All");
   const [verdict, setVerdict] = useState<VerdictFilter>("All");
+  const [query, setQuery] = useState("");
   const [data, setData] = useState<EdgesResponse | null>(null);
   const [record, setRecord] = useState<RecordSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -401,8 +403,18 @@ export function OpportunitiesPage() {
   }, []);
 
   // Fetch every stat once, then filter in the browser so the stat chips can
-  // show a live pick count per stat.
-  const allEdges = data?.edges ?? [];
+  // show a live pick count per stat. Search narrows everything first, so the
+  // chip counts reflect what you searched for.
+  const all = data?.edges ?? [];
+  const q = query.trim().toLowerCase();
+  const allEdges = q
+    ? all.filter(
+        (e) =>
+          e.player.toLowerCase().includes(q) ||
+          (e.team ?? "").toLowerCase().includes(q) ||
+          statLabel(e.stat_type).toLowerCase().includes(q),
+      )
+    : all;
   const statCounts: Record<string, number> = {};
   for (const e of allEdges) statCounts[e.stat_type] = (statCounts[e.stat_type] ?? 0) + 1;
   const statList = Object.keys(statCounts).sort();
@@ -453,6 +465,8 @@ export function OpportunitiesPage() {
         {/* filter sidebar */}
         <aside className="rise rise-2 shrink-0 lg:w-56">
           <div className="space-y-6 lg:sticky lg:top-4">
+            <SearchBox value={query} onChange={setQuery} />
+
             <div>
               <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
                 Verdict
@@ -544,9 +558,11 @@ export function OpportunitiesPage() {
               <div className="p-4">
                 <EmptyState
                   message={
-                    allEdges.length
-                      ? `No "${VERDICT_FILTERS.find((f) => f.value === verdict)?.label}" picks right now.`
-                      : "No upcoming picks. Go to Update Data and run the pipeline."
+                    q && !allEdges.length
+                      ? `No picks match “${query}”.`
+                      : allEdges.length
+                        ? `No "${VERDICT_FILTERS.find((f) => f.value === verdict)?.label}" picks right now.`
+                        : "No upcoming picks. Go to Update Data and run the pipeline."
                   }
                 />
               </div>

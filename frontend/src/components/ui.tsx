@@ -1,4 +1,42 @@
+import { Search, X } from "lucide-react";
 import type { ReactNode } from "react";
+
+/* ---------- search box ---------- */
+
+export function SearchBox({
+  value,
+  onChange,
+  placeholder = "Search players…",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div className="relative">
+      <Search
+        size={15}
+        className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint"
+      />
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-md border border-line-strong bg-card py-2 pl-9 pr-8 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-ink"
+      />
+      {value && (
+        <button
+          onClick={() => onChange("")}
+          title="Clear"
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-ink-faint hover:text-ink"
+        >
+          <X size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
 
 /* ---------- plain-english translators ---------- */
 
