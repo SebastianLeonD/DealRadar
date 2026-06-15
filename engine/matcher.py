@@ -22,11 +22,11 @@ from engine.probability import (
     BREAKEVEN_PROB,
     assign_verdict,
     best_slips,
-    consensus_probability,
     ev_percent,
     fit_lambda_from_anchor,
     poisson_p_over_push_adjusted,
     prob_over_at_line,
+    tiered_consensus,
 )
 from engine.projections import load_fbref_stats, model_stat_types, project_prop
 from engine.sports import get_sport
@@ -48,6 +48,19 @@ LARGE_LINE_GAP = 2.5        # PP vs closest sharp line, in points
 # LEAN (no soft-only play is ever a confident YES).
 SOFT_BOOKS = {"underdog"}
 SOFT_ONLY_FLAG = "Priced off Underdog (a pick'em app, not a sharp book) — soft line"
+
+# How much a soft pick'em line is allowed to pull the TRUTH estimate when a
+# sharp book also prices the prop. 0 = sharp books decide the probability and
+# Underdog is a venue/line-shop signal only. Bump this (e.g. 0.25) only with
+# settled-bet evidence that the soft line adds predictive signal.
+SOFT_BOOK_WEIGHT = 0.0
+
+
+def _split_books(book_probs: dict[str, float]) -> tuple[dict, dict]:
+    """Partition de-vigged book probabilities into sharp and soft tiers."""
+    sharp = {b: p for b, p in book_probs.items() if b not in SOFT_BOOKS}
+    soft = {b: p for b, p in book_probs.items() if b in SOFT_BOOKS}
+    return sharp, soft
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -110,12 +123,25 @@ def evaluate_player(
     if not book_probs:
         return None
 
-    consensus_over, spread = consensus_probability(book_probs)
+    sharp_probs, soft_probs = _split_books(book_probs)
+    consensus_over, spread = tiered_consensus(sharp_probs, soft_probs, SOFT_BOOK_WEIGHT)
     play = 'OVER' if consensus_over >= 0.5 else 'UNDER'
     win_prob = consensus_over if play == 'OVER' else 1 - consensus_over
 
-    # Anchor line for display/CLV: DraftKings' closest line, else first book's.
-    anchor_book = 'draftkings' if 'draftkings' in books else next(iter(books))
+    # Books actually backing the probability: sharp tier when present (soft only
+    # joins if it's weighted in), else the soft tier we fell back on.
+    if sharp_probs:
+        truth_books = {**sharp_probs, **soft_probs} if SOFT_BOOK_WEIGHT > 0 else sharp_probs
+    else:
+        truth_books = soft_probs
+
+    # Anchor line for display/CLV: DraftKings', else any sharp book's, else
+    # whatever we have — a soft line only when no sharp book quotes this prop.
+    if 'draftkings' in books:
+        anchor_book = 'draftkings'
+    else:
+        sharp_in_books = [b for b in books if b not in SOFT_BOOKS]
+        anchor_book = sharp_in_books[0] if sharp_in_books else next(iter(books))
     anchor_line = min(
         (line for line, _ in books[anchor_book]['points']),
         key=lambda line: abs(line - pp_line),
@@ -131,7 +157,7 @@ def evaluate_player(
     flags = build_trap_flags(pp_player, latest_capture, line_gap, spread, injury)
     if extra_flags:
         flags = extra_flags + flags
-    if set(book_probs) <= SOFT_BOOKS:
+    if not sharp_probs:
         flags = [SOFT_ONLY_FLAG] + flags
     verdict = assign_verdict(win_prob, flags)
 
@@ -141,7 +167,7 @@ def evaluate_player(
         'ev_percent': ev_percent(win_prob),
         'verdict': verdict,
         'flags': flags,
-        'book_count': len(book_probs),
+        'book_count': len(truth_books),
         'consensus_over': consensus_over,
         'spread': spread,
         'anchor_line': anchor_line,
@@ -202,15 +228,21 @@ def evaluate_combo(
         book_probs[book] = poisson_p_over_push_adjusted(lam_total * rate_scale, pp_line)
         anchor_total = lam_total  # last book's rate as display anchor
 
-    consensus_over, spread = consensus_probability(book_probs)
+    sharp_probs, soft_probs = _split_books(book_probs)
+    consensus_over, spread = tiered_consensus(sharp_probs, soft_probs, SOFT_BOOK_WEIGHT)
     play = 'OVER' if consensus_over >= 0.5 else 'UNDER'
     win_prob = consensus_over if play == 'OVER' else 1 - consensus_over
+
+    if sharp_probs:
+        truth_books = {**sharp_probs, **soft_probs} if SOFT_BOOK_WEIGHT > 0 else sharp_probs
+    else:
+        truth_books = soft_probs
 
     flags = list(extra_flags)
     flags.append('Combo: correlation between legs not modeled')
     if spread > BOOK_DISAGREEMENT:
         flags.append(f'Books disagree by {spread * 100:.0f}% — market unsettled')
-    if set(book_probs) <= SOFT_BOOKS:
+    if not sharp_probs:
         flags.append(SOFT_ONLY_FLAG)
 
     evaluation = {
@@ -219,7 +251,7 @@ def evaluate_combo(
         'ev_percent': ev_percent(win_prob),
         'verdict': assign_verdict(win_prob, flags),
         'flags': flags,
-        'book_count': len(book_probs),
+        'book_count': len(truth_books),
         'consensus_over': consensus_over,
         'spread': spread,
         'anchor_line': round(anchor_total * rate_scale, 2),  # modeled combined rate

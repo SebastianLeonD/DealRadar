@@ -356,3 +356,37 @@ def consensus_probability(book_probs: dict[str, float]) -> tuple[float, float]:
     avg = sum(values) / len(values)
     spread = max(values) - min(values) if len(values) > 1 else 0.0
     return avg, spread
+
+
+def tiered_consensus(
+    sharp_probs: dict[str, float],
+    soft_probs: dict[str, float],
+    soft_weight: float = 0.0,
+) -> tuple[float, float]:
+    """True-probability consensus that trusts sharp books over soft pick'em apps.
+
+    Sharp sportsbooks (DraftKings et al.) price the truth; pick'em apps
+    (Underdog) post softer, shaded lines. So when any sharp book covers the
+    prop, the estimate is the sharp average, with soft books pulling on it only
+    in proportion to ``soft_weight`` (0 = excluded entirely). Disagreement
+    (spread) is measured among the SHARP books alone — a soft book differing
+    from the sharps is a line-shopping signal, not an unsettled market.
+
+    With no sharp book, the soft books are the only market we have, so they
+    carry the estimate outright (the caller flags it soft to cap the verdict).
+    """
+    if not sharp_probs:
+        return consensus_probability(soft_probs)
+
+    sharp_vals = list(sharp_probs.values())
+    sharp_avg = sum(sharp_vals) / len(sharp_vals)
+    spread = max(sharp_vals) - min(sharp_vals) if len(sharp_vals) > 1 else 0.0
+
+    if soft_probs and soft_weight > 0:
+        soft_vals = list(soft_probs.values())
+        soft_avg = sum(soft_vals) / len(soft_vals)
+        consensus = (sharp_avg + soft_weight * soft_avg) / (1.0 + soft_weight)
+    else:
+        consensus = sharp_avg
+
+    return consensus, spread
