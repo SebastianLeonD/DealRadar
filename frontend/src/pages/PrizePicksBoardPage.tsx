@@ -100,41 +100,102 @@ function TrackBetButton({ edge }: { edge: Edge }) {
   );
 }
 
-/* ---------- Underdog line-shop strip ---------- */
+/* ---------- line board: PrizePicks vs sharp reference vs Underdog venue ----------
+ *
+ * Three roles, deliberately distinct:
+ *   • PrizePicks  — the line you actually bet
+ *   • DraftKings  — the sharp reference: is the PP line off the true market?
+ *   • Underdog    — an alternate pick'em venue: where to place each side
+ */
 
-function UnderdogStrip({ ud }: { ud: PpUnderdog }) {
-  if (ud.ud_delta === 0) {
-    return (
-      <div className="mt-2 flex items-center justify-between rounded-md border border-line bg-paper px-2.5 py-1.5 text-[11px] text-ink-faint">
-        <span>Underdog · same line</span>
-        {ud.ud_higher_multiplier != null && ud.ud_lower_multiplier != null && (
-          <span className="tnum">
-            ×{ud.ud_higher_multiplier} / ×{ud.ud_lower_multiplier}
+function LineRow({
+  label,
+  hint,
+  value,
+  delta,
+  emphasis,
+}: {
+  label: string;
+  hint?: string;
+  value: number;
+  delta?: number | null;
+  emphasis?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between py-0.5">
+      <div className="min-w-0 truncate">
+        <span className={emphasis ? "font-semibold text-ink" : "text-ink-soft"}>{label}</span>
+        {hint && <span className="ml-1.5 text-[10px] text-ink-faint">{hint}</span>}
+      </div>
+      <span className="tnum shrink-0 font-semibold text-ink">
+        {value}
+        {delta != null && delta !== 0 && (
+          <span className="ml-1 font-normal text-ink-faint">
+            ({delta > 0 ? "+" : ""}
+            {delta})
           </span>
         )}
-      </div>
-    );
-  }
+      </span>
+    </div>
+  );
+}
+
+/** The app + concrete line for a given side ("OVER"/"UNDER"). */
+function venueFor(side: "OVER" | "UNDER", prop: PpBoardProp, ud: PpUnderdog) {
+  const app = side === "OVER" ? ud.over_app : ud.under_app;
+  const line = app === "UD" ? ud.ud_line : prop.line; // EVEN -> lines are equal
+  return { app, line };
+}
+
+function LineBoard({ prop, e }: { prop: PpBoardProp; e: PpEngine | null | undefined }) {
+  const ud = prop.underdog ?? null;
+  // dk_line is a real book line only for book-priced edges; for pure models
+  // (form / combo projections) it isn't a line you can shop.
+  const hasSharp =
+    e?.dk_line != null && e.edge_type !== "Form Model" && e.edge_type !== "Combo Model";
+  if (!hasSharp && !ud) return null;
+
+  const dkDelta = hasSharp ? Math.round((e!.dk_line! - prop.line) * 100) / 100 : null;
+  const side = e?.play ?? null; // the engine's pick, if any
+
   return (
-    <div className="mt-2 rounded-md border border-bet/30 bg-bet-soft/40 px-2.5 py-1.5 text-[11px]">
-      <div className="flex items-center justify-between">
-        <span className="text-ink-faint">Underdog line</span>
-        <span className="font-semibold text-ink">
-          <span className="tnum">{ud.ud_line}</span>{" "}
-          <span className="tnum text-ink-faint">
-            ({ud.ud_delta > 0 ? "+" : ""}
-            {ud.ud_delta})
-          </span>
-        </span>
-      </div>
-      <div className="mt-1 flex gap-3 text-ink-faint">
-        <span>
-          Over → <span className="font-semibold text-ink">{APP_NAME[ud.over_app]}</span>
-        </span>
-        <span>
-          Under → <span className="font-semibold text-ink">{APP_NAME[ud.under_app]}</span>
-        </span>
-      </div>
+    <div className="mt-2 rounded-md border border-line bg-paper px-2.5 py-1.5 text-[11px]">
+      <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-faint">
+        Lines
+      </p>
+      <LineRow label="PrizePicks" hint="you bet here" value={prop.line} emphasis />
+      {hasSharp && (
+        <LineRow label="DraftKings" hint="sharp reference" value={e!.dk_line!} delta={dkDelta} />
+      )}
+      {ud && <LineRow label="Underdog" hint="alt. venue" value={ud.ud_line} delta={ud.ud_delta} />}
+
+      {ud &&
+        ud.ud_delta !== 0 &&
+        (side ? (
+          // Engine has a side — show only the venue for THAT side, concretely.
+          (() => {
+            const { app, line } = venueFor(side, prop, ud);
+            const word = side === "OVER" ? "Over" : "Under";
+            return (
+              <div className="mt-1 border-t border-line pt-1 text-[10px] text-ink-faint">
+                Best spot for this {word}:{" "}
+                <span className="font-semibold text-ink">
+                  {app === "EVEN" ? "either app" : `${APP_NAME[app]} (${word} ${line})`}
+                </span>
+              </div>
+            );
+          })()
+        ) : (
+          // No engine side (stats-only card) — you pick the side, so show both.
+          <div className="mt-1 flex gap-3 border-t border-line pt-1 text-[10px] text-ink-faint">
+            <span>
+              If Over → <span className="font-semibold text-ink">{APP_NAME[ud.over_app]}</span>
+            </span>
+            <span>
+              If Under → <span className="font-semibold text-ink">{APP_NAME[ud.under_app]}</span>
+            </span>
+          </div>
+        ))}
     </div>
   );
 }
@@ -233,7 +294,7 @@ function PlayerCard({
         </div>
       )}
 
-      {prop.underdog && <UnderdogStrip ud={prop.underdog} />}
+      <LineBoard prop={prop} e={e} />
 
       <div className="mt-2 space-y-2">
         {e && <TrackBetButton edge={edge} />}
@@ -466,10 +527,13 @@ export function PrizePicksBoardPage() {
       </div>
 
       <p className="rise rise-1 mb-6 text-xs leading-relaxed text-ink-faint">
-        Cards with a verdict are the engine's picks (priced against the books / Underdog). Where
-        <span className="font-semibold text-ink-soft"> Underdog</span> posts a different line, take
-        Over on the lower line, Under on the higher. Stats with no feed (passes, dribbles, fantasy
-        score) get a general Claude read only.
+        Cards with a verdict are the engine's picks. The{" "}
+        <span className="font-semibold text-ink-soft">Lines</span> block on each card compares three
+        prices: <span className="font-semibold text-ink-soft">PrizePicks</span> (what you bet),{" "}
+        <span className="font-semibold text-ink-soft">DraftKings</span> (the sharp reference — is the
+        PP line off the true market?) and <span className="font-semibold text-ink-soft">Underdog</span>{" "}
+        (an alternate pick'em venue — take Over on the lower line, Under on the higher). Stats with no
+        feed (passes, dribbles, fantasy score) get a general Claude read only.
       </p>
 
       {loading ? (
