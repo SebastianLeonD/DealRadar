@@ -241,9 +241,9 @@ def load_edges_dataframe(
         return frame
 
     if active_only:
-        # "Today's picks" = unsettled plays whose game kicks off today (local
-        # calendar day) and hasn't already finished. Settled results, other
-        # days, games that ended hours ago, and rows with no start time all drop.
+        # "Upcoming picks" = unsettled plays whose game hasn't finished yet.
+        # Settled results, games that ended hours ago, and rows with no start
+        # time all drop off. Future days stay so every stat type can surface.
         local_tz = datetime.now().astimezone().tzinfo
         kickoff = pd.to_datetime(
             frame["commence_time"], utc=True, errors="coerce"
@@ -253,7 +253,6 @@ def load_edges_dataframe(
         frame = frame[
             frame["result"].isna()
             & kickoff.notna()
-            & (kickoff.dt.date == now.date())
             & (kickoff >= ended_before)
         ]
         if frame.empty:

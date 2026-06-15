@@ -57,7 +57,7 @@ export function HelpPage() {
         <ol className="list-none space-y-3 pl-0">
           {[
             ["Before games — capture PrizePicks.", "Open the PrizePicks projections in your browser, copy the raw data, and save it into data/raw/prizepicks_raw.json. Do this 2–4 hours before kickoff/tip-off, when lineups are out and the books have posted."],
-            ["Press “Run everything” on the Update Data tab.", "It downloads bookmaker lines, reads your PrizePicks file, and produces verdicts on Today's Picks. Takes under a minute."],
+            ["Press “Run everything” on the Update Data tab.", "It downloads bookmaker lines, reads your PrizePicks file, and produces verdicts on Upcoming Picks. Takes under a minute."],
             ["Bet what says YES.", "MAYBE picks are your judgment call — hover the warning triangle to see why the system hesitated."],
             ["Next morning — press “Grade yesterday.”", "The system looks up real box scores, marks every pick Won or Lost, and your lifetime record updates. This is how the system proves whether it's actually good."],
           ].map(([bold, rest], i) => (
@@ -96,7 +96,7 @@ export function HelpPage() {
           <div className="flex items-start gap-3">
             <Badge variant="skip">SKIP</Badge>
             <p className="text-sm">
-              Below break-even. These never even appear on Today's Picks — no pick shown means
+              Below break-even. These never even appear on Upcoming Picks — no pick shown means
               the answer was no.
             </p>
           </div>
@@ -231,7 +231,7 @@ export function HelpPage() {
             money, and treat our record as the system's scoreboard.
           </p>
         </Faq>
-        <Faq q="Nothing shows on Today's Picks — is it broken?">
+        <Faq q="Nothing shows on Upcoming Picks — is it broken?">
           <p>
             Probably not. If every line was priced below break-even, showing nothing IS the
             answer: no good bets tonight. Check the run details on Update Data — if it says

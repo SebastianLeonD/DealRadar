@@ -40,7 +40,7 @@ const STEPS: {
   {
     key: "run_matcher",
     title: "Find the picks",
-    body: "Compares both sides, calculates win chances, and posts verdicts to Today's Picks. Free.",
+    body: "Compares both sides, calculates win chances, and posts verdicts to Upcoming Picks. Free.",
   },
   {
     key: "settle_results",

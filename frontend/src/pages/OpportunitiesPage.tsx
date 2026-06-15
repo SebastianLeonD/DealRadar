@@ -40,6 +40,33 @@ const VERDICT_FILTERS: { value: VerdictFilter; label: string }[] = [
   { value: "NO", label: "No" },
 ];
 
+/** A filter pill showing a stat and how many picks we have for it. */
+function StatChip({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-semibold transition-colors ${
+        active
+          ? "border-ink bg-ink text-paper"
+          : "border-line-strong bg-card text-ink-soft hover:border-ink hover:text-ink"
+      }`}
+    >
+      {label}
+      <span className={`tnum text-xs ${active ? "text-paper/70" : "text-ink-faint"}`}>{count}</span>
+    </button>
+  );
+}
+
 function matchupLabel(edge: Edge): string | null {
   if (edge.opponent) return `vs ${edge.opponent}`;
   if (edge.game) return edge.game;
@@ -299,7 +326,7 @@ export function OpportunitiesPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setData(await api.getEdges(stat, "All"));
+      setData(await api.getEdges("All", "All"));
     } catch {
       setData({
         edges: [],
@@ -308,7 +335,7 @@ export function OpportunitiesPage() {
     } finally {
       setLoading(false);
     }
-  }, [stat]);
+  }, []);
 
   useEffect(() => {
     load();
@@ -318,15 +345,21 @@ export function OpportunitiesPage() {
     api.getRecord().then(setRecord).catch(() => {});
   }, []);
 
+  // Fetch every stat once, then filter in the browser so the stat chips can
+  // show a live pick count per stat.
   const allEdges = data?.edges ?? [];
-  const edges =
-    verdict === "All" ? allEdges : allEdges.filter((e) => e.verdict === verdict);
-  const strong = allEdges.filter(isStrong);
+  const statCounts: Record<string, number> = {};
+  for (const e of allEdges) statCounts[e.stat_type] = (statCounts[e.stat_type] ?? 0) + 1;
+  const statList = Object.keys(statCounts).sort();
+
+  const byStat = stat === "All" ? allEdges : allEdges.filter((e) => e.stat_type === stat);
+  const edges = verdict === "All" ? byStat : byStat.filter((e) => e.verdict === verdict);
+  const strong = byStat.filter(isStrong);
 
   return (
     <div>
       <PageHeader
-        title="Today's Picks"
+        title="Upcoming Picks"
         subtitle="Upcoming PrizePicks lines, priced against the bookmakers. YES means bet it. MAYBE means read the warning first. Ask Claude on any pick for a matchup-aware second opinion."
         action={
           <a
@@ -342,8 +375,8 @@ export function OpportunitiesPage() {
 
       {data && !loading && (
         <div className="rise rise-1 mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">
-          <MetricCard label="Bet-worthy today" value={data.summary.yes_count} hint="verdict: YES" />
-          <MetricCard label="Picks today" value={data.summary.unique} hint="upcoming, above break-even" />
+          <MetricCard label="Bet-worthy" value={data.summary.yes_count} hint="verdict: YES" />
+          <MetricCard label="Upcoming picks" value={data.summary.unique} hint="above break-even" />
           <MetricCard
             label="Lifetime record"
             value={
@@ -385,27 +418,32 @@ export function OpportunitiesPage() {
         </section>
       )}
 
-      <div className="rise rise-3 mb-4 flex flex-wrap items-center gap-3">
-        <select
-          value={stat}
-          onChange={(e) => setStat(e.target.value)}
-          className="rounded-md border border-line-strong bg-card px-3 py-2 text-sm font-medium text-ink outline-none focus:border-ink"
-        >
-          <option value="All">All stats</option>
-          {(data?.summary.stats ?? []).map((s) => (
-            <option key={s} value={s}>
-              {statLabel(s)}
-            </option>
+      <div className="rise rise-3 mb-4 space-y-3">
+        <div className="flex flex-wrap gap-2">
+          <StatChip
+            label="All stats"
+            count={allEdges.length}
+            active={stat === "All"}
+            onClick={() => setStat("All")}
+          />
+          {statList.map((s) => (
+            <StatChip
+              key={s}
+              label={statLabel(s)}
+              count={statCounts[s]}
+              active={stat === s}
+              onClick={() => setStat(s)}
+            />
           ))}
-        </select>
+        </div>
 
         <div className="inline-flex items-center rounded-md border border-line-strong bg-card p-0.5">
           {VERDICT_FILTERS.map((f) => {
             const active = verdict === f.value;
             const count =
               f.value === "All"
-                ? allEdges.length
-                : allEdges.filter((e) => e.verdict === f.value).length;
+                ? byStat.length
+                : byStat.filter((e) => e.verdict === f.value).length;
             return (
               <button
                 key={f.value}
@@ -444,7 +482,7 @@ export function OpportunitiesPage() {
             <EmptyState
               message={
                 allEdges.length
-                  ? `No "${VERDICT_FILTERS.find((f) => f.value === verdict)?.label}" picks today.`
+                  ? `No "${VERDICT_FILTERS.find((f) => f.value === verdict)?.label}" picks right now.`
                   : "No upcoming picks. Go to Update Data and run the pipeline."
               }
             />
