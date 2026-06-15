@@ -70,3 +70,35 @@ def test_no_games_played_returns_none():
 def test_model_stat_types_match_field_map():
     assert set(model_stat_types()) == set(FIELD_BY_STAT)
     assert "player_shots" not in model_stat_types()  # book-priced, not modeled
+
+
+# --- stats-only analyst mode ---
+from engine.ai_analyst import build_context, format_prompt  # noqa: E402
+from engine.projections import player_form  # noqa: E402
+
+FORM_PLAYERS = [{
+    "player": "Test Striker", "team": "Brazil", "normalized": "test striker",
+    "matches_played": 2.0, "minutes": 180.0, "shots": 7.0,
+    "per90": {"shots": 3.5},
+}]
+
+
+def test_player_form_reports_per_game_rate_for_book_stat():
+    pf = player_form("Test Striker", "player_shots", FORM_PLAYERS)
+    assert pf["per_game"] == 3.5  # 7 shots / 2 games
+    assert pf["games"] == 2
+
+
+def test_player_form_falls_back_to_full_match_for_1h_props():
+    pf = player_form("Test Striker", "player_shots_1h", FORM_PLAYERS)
+    assert pf is not None and pf["stat"] == "shots"
+
+
+def test_stats_only_prompt_drops_the_sharp_book_block():
+    edge = {"player": "Nobody Here", "team": "Narnia", "stat_type": "player_shots",
+            "pp_line": 1.5, "win_prob": 0.6, "play": "OVER", "verdict": "LEAN"}
+    full = format_prompt(build_context(edge, mode="full"))
+    stats = format_prompt(build_context(edge, mode="stats_only"))
+    assert "Sharp multi-book consensus" in full
+    assert "Sharp multi-book consensus" not in stats
+    assert "no engine pick" in stats

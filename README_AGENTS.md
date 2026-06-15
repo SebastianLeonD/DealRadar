@@ -367,6 +367,16 @@ Every pick also has a **"What Claude sees"** toggle that shows the exact prompt
 (the play's facts) and the system instructions — no model call, full
 transparency into what's being asked and how.
 
+**Two analysis modes** (toggle next to the verdict chips):
+- **Full** — the read described above, anchored to the sharp-book consensus.
+- **PrizePicks-only** — drops all sportsbook data and judges the play from the
+  *stats alone*: the player's tournament per-game rate (FBref) plus the team
+  form, no win%/EV. The "stats half" of the analysis — the right tool for the
+  many PP props with no book line. Uses a separate system prompt
+  (`STATS_ONLY_SYSTEM_PROMPT`) that leads from the player's rate, respects small
+  samples, and defaults to PASS when there's no real basis. Pass `mode` to
+  `/api/edges/analyze` and `/api/edges/prompt` (`"full"` | `"stats_only"`).
+
 The board itself only lists **today's upcoming, unsettled plays**: settled
 results and games that have already kicked off drop off automatically (your
 lifetime record still counts them).

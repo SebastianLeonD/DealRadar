@@ -61,6 +61,28 @@ SYSTEM_PROMPT = (
     "information that is not in the context."
 )
 
+STATS_ONLY_SYSTEM_PROMPT = (
+    "You are a soccer analyst giving a form- and matchup-based read on a single "
+    "PrizePicks player prop. IMPORTANT: there is NO sportsbook line for this "
+    "prop — you have no market to lean on. Reason ONLY from the data provided "
+    "(the player's tournament form, the team form) plus your tactical knowledge "
+    "of the players and teams.\n\n"
+    "How to reason:\n"
+    "- START FROM THE PLAYER. If a per-game rate is given, that is your anchor: "
+    "compare it directly to the PrizePicks line. Is this player a high-volume "
+    "source of this stat or a peripheral one?\n"
+    "- WEIGH THE MATCHUP using the team form. Does the player's side create "
+    "enough volume, and is the opponent leaky or stingy in this area? For a "
+    "goalkeeper, more saves come from a busy keeper on a team under pressure.\n"
+    "- RESPECT SMALL SAMPLES. World Cup form is often one or two matches. Treat "
+    "it as weak evidence and lean on what you know about the player; say so.\n"
+    "- BE HONEST ABOUT UNCERTAINTY. With no market and little data, the right "
+    "answer is often PASS. Do NOT invent stats you were not given. If you have "
+    "no real basis, return PASS with low confidence.\n"
+    "- This is the stats half of the analysis only — there is no market check, so "
+    "do not pretend one exists."
+)
+
 _JSON_INSTRUCTION = (
     "Respond with ONLY a JSON object (no markdown, no code fences, no prose) of "
     "exactly this shape:\n"
@@ -103,8 +125,12 @@ def opponent_from_game(game: str | None, team: str | None) -> str:
     return ""
 
 
-def build_context(edge: dict) -> dict:
-    """Normalise a frontend/DB edge row into the analyst's context. Pure."""
+def build_context(edge: dict, mode: str = "full") -> dict:
+    """Normalise a frontend/DB edge row into the analyst's context.
+
+    mode='full' includes the sharp-book consensus. mode='stats_only' drops it and
+    adds the player's own form rate — a PrizePicks-only, stats-driven read.
+    """
     pp_line = _num(edge.get("pp_line"))
     dk_line = _num(edge.get("dk_line") if edge.get("dk_line") is not None
                    else edge.get("dk_line_at_flag"))
@@ -126,7 +152,14 @@ def build_context(edge: dict) -> dict:
     from engine.team_profiles import team_form
     form = team_form(team, opponent)
 
+    player = edge.get("player") or edge.get("pp_player_name")
+    player_rate = None
+    if mode == "stats_only":
+        from engine.projections import player_form
+        player_rate = player_form(player, edge.get("stat_type"))
+
     return {
+        "mode": mode,
         "player": edge.get("player") or edge.get("pp_player_name"),
         "team": team,
         "opponent": opponent,
@@ -143,6 +176,7 @@ def build_context(edge: dict) -> dict:
         "book_count": edge.get("book_count"),
         "trap_flags": flag_list,
         "team_form": form,
+        "player_form": player_rate,
     }
 
 
@@ -156,22 +190,39 @@ def format_prompt(ctx: dict) -> str:
     else:
         matchup_line = "Matchup: opponent unknown — reason from the numbers only"
 
+    stats_only = ctx.get("mode") == "stats_only"
+
     lines = [
         f"Player: {ctx.get('player')} ({ctx.get('team') or 'team n/a'})",
         matchup_line,
         f"Market: {ctx.get('stat_type')}",
         f"PrizePicks line: {ctx.get('prizepicks_line')}",
-        f"Engine's favoured side: {ctx.get('engine_favoured_side')}  "
-        f"(verdict: {ctx.get('engine_verdict')})",
-        "",
-        "Sharp multi-book consensus:",
-        f"  true win probability of the favoured side: {_pct(ctx.get('win_probability'))}",
-        f"  EV over the 54.25% break-even: {_signed(ctx.get('ev_percent'))}",
-        f"  books' anchor line: {ctx.get('sharp_anchor_line')}  "
-        f"(gap vs PP line: {ctx.get('line_gap')})",
-        f"  edge type: {ctx.get('edge_type')}",
-        f"  books contributing: {ctx.get('book_count')}",
     ]
+
+    if stats_only:
+        pf = ctx.get("player_form")
+        lines.append("")
+        if pf:
+            lines.append(
+                f"Player form this World Cup: {pf['per_game']} {pf['stat']} per game "
+                f"over {pf['games']} match(es) ({pf['minutes']} min)."
+            )
+        else:
+            lines.append("Player form: no tournament data yet for this stat — "
+                         "reason from what you know about the player, and be cautious.")
+    else:
+        lines += [
+            f"Engine's favoured side: {ctx.get('engine_favoured_side')}  "
+            f"(verdict: {ctx.get('engine_verdict')})",
+            "",
+            "Sharp multi-book consensus:",
+            f"  true win probability of the favoured side: {_pct(ctx.get('win_probability'))}",
+            f"  EV over the 54.25% break-even: {_signed(ctx.get('ev_percent'))}",
+            f"  books' anchor line: {ctx.get('sharp_anchor_line')}  "
+            f"(gap vs PP line: {ctx.get('line_gap')})",
+            f"  edge type: {ctx.get('edge_type')}",
+            f"  books contributing: {ctx.get('book_count')}",
+        ]
     form = ctx.get("team_form") or {}
     if form:
         lines.append("")
@@ -194,24 +245,35 @@ def format_prompt(ctx: dict) -> str:
     else:
         lines.append("Trap flags: none.")
     lines.append("")
-    lines.append(
-        "Decide OVER, UNDER, or PASS for this PrizePicks line. Set "
-        "agrees_with_engine to whether your pick matches the engine's favoured side."
-    )
+    if stats_only:
+        lines.append(
+            "Decide OVER, UNDER, or PASS for this PrizePicks line from the form and "
+            "matchup alone. There is no engine pick to compare to, so set "
+            "agrees_with_engine to false."
+        )
+    else:
+        lines.append(
+            "Decide OVER, UNDER, or PASS for this PrizePicks line. Set "
+            "agrees_with_engine to whether your pick matches the engine's favoured side."
+        )
     return "\n".join(lines)
 
 
-def describe_request(edge: dict) -> dict:
+def _system_for(mode: str) -> str:
+    return STATS_ONLY_SYSTEM_PROMPT if mode == "stats_only" else SYSTEM_PROMPT
+
+
+def describe_request(edge: dict, mode: str = "full") -> dict:
     """Exactly what gets handed to Claude, for UI transparency. No model call.
 
     Returns the structured context the engine extracted, the rendered user
     prompt, the system instructions, and the required response shape.
     """
-    ctx = build_context(edge)
+    ctx = build_context(edge, mode=mode)
     return {
         "context": ctx,
         "prompt": format_prompt(ctx),
-        "system": SYSTEM_PROMPT,
+        "system": _system_for(mode),
         "response_format": _JSON_INSTRUCTION,
     }
 
@@ -255,9 +317,9 @@ def extract_recommendation(text: str) -> dict:
 # ---------------------------------------------------------------------------
 # Backends
 # ---------------------------------------------------------------------------
-def analyze_play(edge: dict, backend: str | None = None, runner=None) -> dict:
+def analyze_play(edge: dict, backend: str | None = None, runner=None, mode: str = "full") -> dict:
     """Evaluate one edge with Claude. Returns the recommendation dict."""
-    ctx = build_context(edge)
+    ctx = build_context(edge, mode=mode)
     backend = (backend or os.getenv("AI_BACKEND") or AI_BACKEND).lower()
     if backend == "auto":
         backend = "cli" if cli_available() else "sdk"
@@ -279,7 +341,7 @@ def _analyze_via_cli(ctx: dict, runner=None) -> dict:
         binary, "-p", prompt,
         "--output-format", "json",
         "--model", model,
-        "--append-system-prompt", SYSTEM_PROMPT,
+        "--append-system-prompt", _system_for(ctx.get("mode", "full")),
     ]
     result = runner(cmd, capture_output=True, text=True, timeout=240)
     if getattr(result, "returncode", 0) != 0:
@@ -315,7 +377,7 @@ def _analyze_via_sdk(ctx: dict) -> dict:
     message = client.messages.create(
         model=AI_SDK_MODEL,
         max_tokens=AI_MAX_TOKENS,
-        system=SYSTEM_PROMPT,
+        system=_system_for(ctx.get("mode", "full")),
         messages=[{"role": "user", "content": f"{format_prompt(ctx)}\n\n{_JSON_INSTRUCTION}"}],
     )
     text = "".join(b.text for b in message.content if getattr(b, "type", None) == "text")

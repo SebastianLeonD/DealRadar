@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   api,
   type AiRecommendation,
+  type AnalysisMode,
   type Edge,
   type EdgesResponse,
   type RecordSummary,
@@ -74,11 +75,16 @@ function LineSource({ edge }: { edge: Edge }) {
 
 /* ---------- transparency: exactly what we send Claude ---------- */
 
-function PromptBox({ edge }: { edge: Edge }) {
+function PromptBox({ edge, mode }: { edge: Edge; mode: AnalysisMode }) {
   const [open, setOpen] = useState(false);
   const [sent, setSent] = useState<SentToAi | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The prompt depends on the mode, so drop a stale preview when it changes.
+  useEffect(() => {
+    setSent(null);
+  }, [mode]);
 
   const toggle = useCallback(async () => {
     const next = !open;
@@ -87,7 +93,7 @@ function PromptBox({ edge }: { edge: Edge }) {
       setLoading(true);
       setError(null);
       try {
-        const res = await api.previewPrompt(edge);
+        const res = await api.previewPrompt(edge, mode);
         if (res.ok) setSent(res.sent);
         else setError("Couldn't load the prompt.");
       } catch {
@@ -96,7 +102,7 @@ function PromptBox({ edge }: { edge: Edge }) {
         setLoading(false);
       }
     }
-  }, [open, sent, loading, edge]);
+  }, [open, sent, loading, edge, mode]);
 
   return (
     <div className="mt-2">
@@ -228,10 +234,12 @@ function StrongPickCard({
   edge,
   entry,
   onAnalyze,
+  mode,
 }: {
   edge: Edge;
   entry: AiEntry | undefined;
   onAnalyze: (edge: Edge) => void;
+  mode: AnalysisMode;
 }) {
   const word = verdictWord(edge.verdict);
   const matchup = matchupLabel(edge);
@@ -307,7 +315,7 @@ function StrongPickCard({
           Claude's read
         </div>
         <AiResult edge={edge} entry={entry} onAnalyze={onAnalyze} />
-        <PromptBox edge={edge} />
+        <PromptBox edge={edge} mode={mode} />
       </div>
     </div>
   );
@@ -321,10 +329,12 @@ function BoardRow({
   edge,
   entry,
   onAnalyze,
+  mode,
 }: {
   edge: Edge;
   entry: AiEntry | undefined;
   onAnalyze: (edge: Edge) => void;
+  mode: AnalysisMode;
 }) {
   const word = verdictWord(edge.verdict);
   const [open, setOpen] = useState(false);
@@ -404,7 +414,7 @@ function BoardRow({
       {open && (
         <div className="border-t border-line bg-paper px-4 py-3">
           <AiResult edge={edge} entry={entry} onAnalyze={onAnalyze} />
-          <PromptBox edge={edge} />
+          <PromptBox edge={edge} mode={mode} />
         </div>
       )}
     </div>
@@ -418,11 +428,12 @@ export function OpportunitiesPage() {
   const [record, setRecord] = useState<RecordSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [ai, setAi] = useState<Record<number, AiEntry>>({});
+  const [mode, setMode] = useState<AnalysisMode>("full");
 
   const analyze = useCallback(async (edge: Edge) => {
     setAi((prev) => ({ ...prev, [edge.id]: { status: "loading" } }));
     try {
-      const res = await api.analyzeEdge(edge);
+      const res = await api.analyzeEdge(edge, mode);
       if (res.ok && res.recommendation) {
         setAi((prev) => ({
           ...prev,
@@ -440,7 +451,7 @@ export function OpportunitiesPage() {
         [edge.id]: { status: "error", error: "Could not reach the analyst." },
       }));
     }
-  }, []);
+  }, [mode]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -520,7 +531,13 @@ export function OpportunitiesPage() {
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
             {strong.map((edge) => (
-              <StrongPickCard key={edge.id} edge={edge} entry={ai[edge.id]} onAnalyze={analyze} />
+              <StrongPickCard
+                key={edge.id}
+                edge={edge}
+                entry={ai[edge.id]}
+                onAnalyze={analyze}
+                mode={mode}
+              />
             ))}
           </div>
         </section>
@@ -564,10 +581,41 @@ export function OpportunitiesPage() {
           })}
         </div>
 
-        <p className="ml-auto text-xs text-ink-faint">
-          Tap <span className="font-semibold text-ink-soft">AI</span> on any row to ask Claude or see its prompt
-        </p>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-xs text-ink-faint">AI read:</span>
+          <div className="inline-flex items-center rounded-md border border-line-strong bg-card p-0.5">
+            {([
+              { value: "full", label: "Full" },
+              { value: "stats_only", label: "PrizePicks-only" },
+            ] as { value: AnalysisMode; label: string }[]).map((m) => {
+              const active = mode === m.value;
+              return (
+                <button
+                  key={m.value}
+                  onClick={() => setMode(m.value)}
+                  title={
+                    m.value === "stats_only"
+                      ? "Ask Claude using player + matchup form only — no sportsbook data"
+                      : "Ask Claude with the full sharp-book read"
+                  }
+                  className={`rounded px-3 py-1.5 text-sm font-semibold transition-colors ${
+                    active ? "bg-ink text-paper" : "text-ink-soft hover:text-ink"
+                  }`}
+                >
+                  {m.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
+
+      {mode === "stats_only" && (
+        <p className="rise rise-3 -mt-2 mb-4 text-xs text-ink-faint">
+          PrizePicks-only mode: Claude judges each play from the player's form and the
+          matchup alone — no sportsbook lines. The stats half of the analysis.
+        </p>
+      )}
 
       <div className="rise rise-3 overflow-hidden rounded-lg border border-line bg-card">
         <div
@@ -596,7 +644,13 @@ export function OpportunitiesPage() {
           </div>
         ) : (
           edges.map((edge) => (
-            <BoardRow key={edge.id} edge={edge} entry={ai[edge.id]} onAnalyze={analyze} />
+            <BoardRow
+              key={edge.id}
+              edge={edge}
+              entry={ai[edge.id]}
+              onAnalyze={analyze}
+              mode={mode}
+            />
           ))
         )}
       </div>

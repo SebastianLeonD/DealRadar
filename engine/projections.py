@@ -37,9 +37,52 @@ FIELD_BY_STAT = {
 
 MIN_GAMES_FOR_CONFIDENCE = 2  # one match is too small a sample to trust
 
+# Broader map (incl. book-priced stats) for AI *form context* — not pricing.
+# Lets the stats-only analyst show a player's rate for any stat we track.
+FORM_FIELD_BY_STAT = {
+    "player_shots": "shots",
+    "player_shots_on_target": "shots_on_target",
+    "player_goals": "goals",
+    "player_assists": "assists",
+    **FIELD_BY_STAT,
+}
+
 
 def model_stat_types() -> list[str]:
     return list(FIELD_BY_STAT)
+
+
+def player_form(name: str, stat_type: str, players: list[dict] | None = None) -> dict | None:
+    """A player's tournament rate for one stat, for AI context. None if unknown.
+
+    1H props (e.g. player_shots_1h) fall back to the full-match rate.
+    """
+    players = load_fbref_stats() if players is None else players
+    base = stat_type.replace("_1h", "") if stat_type else ""
+    field = FORM_FIELD_BY_STAT.get(base)
+    if not field or not players:
+        return None
+
+    target = _normalize(name)
+    record = next((p for p in players if p["normalized"] == target), None)
+    if record is None:
+        sharp_name, _ = match_player_name(name, [p["player"] for p in players])
+        if not sharp_name:
+            return None
+        record = next(p for p in players if p["player"] == sharp_name)
+
+    games = record.get("matches_played") or 0
+    if not games:
+        return None
+    total = record.get(field) or 0.0
+    return {
+        "stat": field,
+        "per_game": round(total / games, 2),
+        "per90": (record.get("per90") or {}).get(field),
+        "games": int(games),
+        "minutes": int(record.get("minutes") or 0),
+        "matched_name": record["player"],
+    }
 
 
 def load_fbref_stats(path: Path = FBREF_FILE) -> list[dict]:

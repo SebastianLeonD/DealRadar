@@ -136,6 +136,7 @@ class AnalyzeRequest(BaseModel):
     book_count: int | None = None
     commence_time: str | None = None
     flags: str | None = None
+    mode: str = "full"  # "full" (with sharp books) or "stats_only" (PrizePicks-only)
 
 
 def _with_matchup(edge: dict) -> dict:
@@ -156,8 +157,11 @@ def preview_prompt(req: AnalyzeRequest):
     """Show exactly what would be sent to Claude — no model call, no billing."""
     from engine.ai_analyst import describe_request
 
-    edge = _with_matchup(req.model_dump())
-    return {"ok": True, "opponent": edge.get("opponent"), "sent": describe_request(edge)}
+    payload = req.model_dump()
+    mode = payload.pop("mode", "full")
+    edge = _with_matchup(payload)
+    return {"ok": True, "opponent": edge.get("opponent"),
+            "sent": describe_request(edge, mode=mode)}
 
 
 @app.post("/api/edges/analyze")
@@ -165,11 +169,13 @@ def analyze_edge(req: AnalyzeRequest):
     """Second-opinion OVER/UNDER/PASS call from Claude (your subscription)."""
     from engine.ai_analyst import analyze_play, describe_request
 
-    edge = _with_matchup(req.model_dump())
-    sent = describe_request(edge)
+    payload = req.model_dump()
+    mode = payload.pop("mode", "full")
+    edge = _with_matchup(payload)
+    sent = describe_request(edge, mode=mode)
 
     try:
-        recommendation = analyze_play(edge)
+        recommendation = analyze_play(edge, mode=mode)
         return {
             "ok": True,
             "recommendation": recommendation,

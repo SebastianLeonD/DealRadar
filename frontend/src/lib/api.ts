@@ -1,5 +1,8 @@
 export type Page = "execution" | "opportunities" | "clv" | "help";
 
+/** "full" weighs the sharp books; "stats_only" is a PrizePicks-only, form-based read. */
+export type AnalysisMode = "full" | "stats_only";
+
 export interface FeedStatus {
   status: "fresh" | "aging" | "stale";
   label: string;
@@ -159,17 +162,17 @@ export const api = {
     request<EdgesResponse>(
       `/edges?stat=${encodeURIComponent(stat)}&edge_type=${encodeURIComponent(edgeType)}`,
     ),
-  previewPrompt: (edge: Edge) =>
+  previewPrompt: (edge: Edge, mode: AnalysisMode = "full") =>
     request<PromptResponse>("/edges/prompt", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(edge),
+      body: JSON.stringify({ ...edge, mode }),
     }),
-  analyzeEdge: (edge: Edge) =>
+  analyzeEdge: (edge: Edge, mode: AnalysisMode = "full") =>
     request<AnalyzeResponse>("/edges/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(edge),
+      body: JSON.stringify({ ...edge, mode }),
     }),
   getClv: (refresh = false) =>
     request<ClvResponse>(`/clv?refresh=${refresh}`),
