@@ -19,6 +19,10 @@ from storage.db_manager import get_connection, get_player_game_map, init_db, ing
 
 FRESHNESS_MINUTES = 5
 
+# A soccer match runs ~2h with halftime and stoppage; once this much time has
+# passed since kickoff the game is treated as over and drops off the board.
+MATCH_OVER_HOURS = 2.5
+
 EDGE_DEDUPE_KEYS = ["player", "play", "pp_line", "dk_line", "edge_type", "stat_type"]
 CLV_DEDUPE_KEYS = ["pp_player_name", "play", "pp_line", "dk_line_at_flag", "edge_type", "stat_type"]
 
@@ -238,17 +242,19 @@ def load_edges_dataframe(
 
     if active_only:
         # "Today's picks" = unsettled plays whose game kicks off today (local
-        # calendar day). Settled results, other days, and rows with no start
-        # time all drop off.
+        # calendar day) and hasn't already finished. Settled results, other
+        # days, games that ended hours ago, and rows with no start time all drop.
         local_tz = datetime.now().astimezone().tzinfo
         kickoff = pd.to_datetime(
             frame["commence_time"], utc=True, errors="coerce"
         ).dt.tz_convert(local_tz)
-        today = pd.Timestamp.now(tz=local_tz).date()
+        now = pd.Timestamp.now(tz=local_tz)
+        ended_before = now - pd.Timedelta(hours=MATCH_OVER_HOURS)
         frame = frame[
             frame["result"].isna()
             & kickoff.notna()
-            & (kickoff.dt.date == today)
+            & (kickoff.dt.date == now.date())
+            & (kickoff >= ended_before)
         ]
         if frame.empty:
             return frame.reset_index(drop=True)

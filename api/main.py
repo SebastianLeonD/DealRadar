@@ -201,15 +201,33 @@ def get_prizepicks_board():
     AI has real numbers for (vs. ones it can only reason about generally)."""
     import json
     from collections import Counter, defaultdict
+    from datetime import datetime, timedelta, timezone
 
     from engine import line_shop
     from engine.projections import FORM_FIELD_BY_STAT
+    from services.pipeline import MATCH_OVER_HOURS
 
     board_file = PROJECT_ROOT / "data" / "processed" / "pp_board.json"
     if not board_file.exists():
         return {"total": 0, "groups": [], "games": []}
     with board_file.open() as file:
         props = json.load(file)
+
+    # Drop props whose game already finished (~2h+ since kickoff). Upcoming and
+    # in-progress games stay; missing/unparseable times are kept, never hidden.
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=MATCH_OVER_HOURS)
+
+    def still_on(prop: dict) -> bool:
+        start = prop.get("start_time")
+        if not start:
+            return True
+        try:
+            kickoff = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        except ValueError:
+            return True
+        return kickoff >= cutoff
+
+    props = [prop for prop in props if still_on(prop)]
 
     # Underdog line-shop: attach UD's line for the same player + stat.
     ud_index = line_shop.build_index(line_shop.load_underdog())
