@@ -55,14 +55,16 @@ function StatChip({
   return (
     <button
       onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-semibold transition-colors ${
+      className={`flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm font-semibold transition-colors ${
         active
           ? "border-ink bg-ink text-paper"
           : "border-line-strong bg-card text-ink-soft hover:border-ink hover:text-ink"
       }`}
     >
-      {label}
-      <span className={`tnum text-xs ${active ? "text-paper/70" : "text-ink-faint"}`}>{count}</span>
+      <span className="truncate">{label}</span>
+      <span className={`tnum shrink-0 text-xs ${active ? "text-paper/70" : "text-ink-faint"}`}>
+        {count}
+      </span>
     </button>
   );
 }
@@ -354,7 +356,7 @@ export function OpportunitiesPage() {
 
   const byStat = stat === "All" ? allEdges : allEdges.filter((e) => e.stat_type === stat);
   const edges = verdict === "All" ? byStat : byStat.filter((e) => e.verdict === verdict);
-  const strong = byStat.filter(isStrong);
+  const strong = edges.filter(isStrong); // featured cards respect both filters
 
   return (
     <div>
@@ -394,116 +396,126 @@ export function OpportunitiesPage() {
         </div>
       )}
 
-      {!loading && strong.length > 0 && (
-        <section className="rise rise-2 mb-10">
-          <div className="mb-3 flex items-center gap-2">
-            <Sparkles size={16} className="text-ink" />
-            <h2 className="text-lg font-semibold text-ink" style={{ fontFamily: "var(--font-display)" }}>
-              Worth a look
-            </h2>
-            <span className="text-xs text-ink-faint">
-              {strong.length} pick{strong.length > 1 ? "s" : ""} the engine likes — ask Claude on the ones you care about
-            </span>
-          </div>
-          <div className="grid gap-4 lg:grid-cols-2">
-            {strong.map((edge) => (
-              <StrongPickCard
-                key={edge.id}
-                edge={edge}
-                entry={ai[edge.id]}
-                onAnalyze={analyze}
-              />
-            ))}
-          </div>
-        </section>
-      )}
+      <div className="flex flex-col gap-6 lg:flex-row">
+        {/* filter sidebar */}
+        <aside className="rise rise-2 shrink-0 lg:w-56">
+          <div className="space-y-6 lg:sticky lg:top-4">
+            <div>
+              <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
+                Verdict
+              </h3>
+              <div className="flex flex-col gap-1.5">
+                {VERDICT_FILTERS.map((f) => (
+                  <StatChip
+                    key={f.value}
+                    label={f.label}
+                    count={
+                      f.value === "All"
+                        ? byStat.length
+                        : byStat.filter((e) => e.verdict === f.value).length
+                    }
+                    active={verdict === f.value}
+                    onClick={() => setVerdict(f.value)}
+                  />
+                ))}
+              </div>
+            </div>
 
-      <div className="rise rise-3 mb-4 space-y-3">
-        <div className="flex flex-wrap gap-2">
-          <StatChip
-            label="All stats"
-            count={allEdges.length}
-            active={stat === "All"}
-            onClick={() => setStat("All")}
-          />
-          {statList.map((s) => (
-            <StatChip
-              key={s}
-              label={statLabel(s)}
-              count={statCounts[s]}
-              active={stat === s}
-              onClick={() => setStat(s)}
-            />
-          ))}
-        </div>
+            <div>
+              <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
+                Stat
+              </h3>
+              <div className="flex flex-col gap-1.5">
+                <StatChip
+                  label="All stats"
+                  count={allEdges.length}
+                  active={stat === "All"}
+                  onClick={() => setStat("All")}
+                />
+                {statList.map((s) => (
+                  <StatChip
+                    key={s}
+                    label={statLabel(s)}
+                    count={statCounts[s]}
+                    active={stat === s}
+                    onClick={() => setStat(s)}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        </aside>
 
-        <div className="inline-flex items-center rounded-md border border-line-strong bg-card p-0.5">
-          {VERDICT_FILTERS.map((f) => {
-            const active = verdict === f.value;
-            const count =
-              f.value === "All"
-                ? byStat.length
-                : byStat.filter((e) => e.verdict === f.value).length;
-            return (
-              <button
-                key={f.value}
-                onClick={() => setVerdict(f.value)}
-                className={`rounded px-3 py-1.5 text-sm font-semibold transition-colors ${
-                  active ? "bg-ink text-paper" : "text-ink-soft hover:text-ink"
-                }`}
-              >
-                {f.label}
-                <span className={`tnum ml-1.5 text-xs ${active ? "text-paper/70" : "text-ink-faint"}`}>
-                  {count}
+        {/* picks */}
+        <div className="min-w-0 flex-1 space-y-8">
+          {!loading && strong.length > 0 && (
+            <section className="rise rise-2">
+              <div className="mb-3 flex items-center gap-2">
+                <Sparkles size={16} className="text-ink" />
+                <h2 className="text-lg font-semibold text-ink" style={{ fontFamily: "var(--font-display)" }}>
+                  Worth a look
+                </h2>
+                <span className="text-xs text-ink-faint">
+                  {strong.length} pick{strong.length > 1 ? "s" : ""} the engine likes — ask Claude on the ones you care about
                 </span>
-              </button>
-            );
-          })}
+              </div>
+              <div className="grid gap-4 xl:grid-cols-2">
+                {strong.map((edge) => (
+                  <StrongPickCard
+                    key={edge.id}
+                    edge={edge}
+                    entry={ai[edge.id]}
+                    onAnalyze={analyze}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          <div className="rise rise-3 overflow-hidden rounded-lg border border-line bg-card">
+            <div
+              className={`grid ${GRID} gap-4 border-b-2 border-ink px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft`}
+            >
+              <span>Player</span>
+              <span>The bet</span>
+              <span>Win chance</span>
+              <span>Verdict</span>
+              <span className="text-right">Claude</span>
+            </div>
+
+            {loading ? (
+              <div className="p-4">
+                <EmptyState message="Loading picks..." />
+              </div>
+            ) : !edges.length ? (
+              <div className="p-4">
+                <EmptyState
+                  message={
+                    allEdges.length
+                      ? `No "${VERDICT_FILTERS.find((f) => f.value === verdict)?.label}" picks right now.`
+                      : "No upcoming picks. Go to Update Data and run the pipeline."
+                  }
+                />
+              </div>
+            ) : (
+              edges.map((edge) => (
+                <BoardRow
+                  key={edge.id}
+                  edge={edge}
+                  entry={ai[edge.id]}
+                  onAnalyze={analyze}
+                />
+              ))
+            )}
+          </div>
+
+          <p className="rise rise-4 text-xs leading-relaxed text-ink-faint">
+            The small tick on each win-chance bar marks 54.25% — the break-even point. Picks below it
+            lose money long-term, so they never appear here. Claude's read is an on-demand second
+            opinion that weighs the opponent and any warnings; it is not financial advice.
+          </p>
         </div>
       </div>
-
-      <div className="rise rise-3 overflow-hidden rounded-lg border border-line bg-card">
-        <div
-          className={`grid ${GRID} gap-4 border-b-2 border-ink px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft`}
-        >
-          <span>Player</span>
-          <span>The bet</span>
-          <span>Win chance</span>
-          <span>Verdict</span>
-          <span className="text-right">Claude</span>
-        </div>
-
-        {loading ? (
-          <div className="p-4">
-            <EmptyState message="Loading picks..." />
-          </div>
-        ) : !edges.length ? (
-          <div className="p-4">
-            <EmptyState
-              message={
-                allEdges.length
-                  ? `No "${VERDICT_FILTERS.find((f) => f.value === verdict)?.label}" picks right now.`
-                  : "No upcoming picks. Go to Update Data and run the pipeline."
-              }
-            />
-          </div>
-        ) : (
-          edges.map((edge) => (
-            <BoardRow
-              key={edge.id}
-              edge={edge}
-              entry={ai[edge.id]}
-              onAnalyze={analyze}
-            />
-          ))
-        )}
-      </div>
-
-      <p className="rise rise-4 mt-4 text-xs leading-relaxed text-ink-faint">
-        The small tick on each win-chance bar marks 54.25% — the break-even point. Picks below it
-        lose money long-term, so they never appear here. Claude's read is an on-demand second
-        opinion that weighs the opponent and any warnings; it is not financial advice.
-      </p>
     </div>
   );
 }
