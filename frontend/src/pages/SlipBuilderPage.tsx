@@ -146,6 +146,11 @@ function SlipView({ slip }: { slip: Slip }) {
           {slip.legs.length}-leg {PROVIDER_NAME[slip.provider]} slip
         </span>
         <span className="text-ink-faint">· ranked by {metricWord} · engine + Claude agree</span>
+        {slip.valid && (
+          <span className="inline-flex items-center gap-1 text-bet">
+            <Check size={13} /> valid lineup
+          </span>
+        )}
       </div>
 
       {slip.short && (
@@ -155,6 +160,16 @@ function SlipView({ slip }: { slip: Slip }) {
             You asked for {slip.requested}, but only {slip.agreed} pick
             {slip.agreed === 1 ? "" : "s"} cleared both the engine and Claude. No padding — a thin
             leg only drags a slip down.
+          </p>
+        </div>
+      )}
+
+      {slip.legs.length >= 2 && !slip.valid && (
+        <div className="flex items-start gap-1.5 rounded-md border border-skip/30 bg-skip-soft px-3 py-2">
+          <AlertTriangle size={13} className="mt-0.5 shrink-0 text-skip" />
+          <p className="text-[12px] leading-relaxed text-skip">
+            Heads up: these legs are all from one team. PrizePicks needs at least two
+            different teams in a lineup — add a leg from another team before submitting.
           </p>
         </div>
       )}
@@ -213,7 +228,7 @@ export function SlipBuilderPage() {
     <div>
       <PageHeader
         title="Build a Slip"
-        subtitle="Pick how many legs and where you're betting. The engine ranks its best picks; Claude reviews the top ones and only legs they both back make the slip — never padded to hit your number."
+        subtitle="Pick how many legs and where you're betting. The engine ranks its best picks; Claude reviews the top ones and only legs they both back make the slip — never padded to hit your number. Every slip is a valid PrizePicks lineup: one leg per player, at least two teams, no combos."
       />
 
       <div className="rise rise-1 mb-6 space-y-4 rounded-lg border border-line bg-card p-4">

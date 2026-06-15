@@ -26,12 +26,32 @@ def _metric_value(edge: dict, metric: str) -> float:
         return float("-inf")
 
 
+def _is_combo(edge: dict) -> bool:
+    """Combo props bundle two players (and sometimes two teams), which tangles
+    the one-player / two-team lineup rules. We show them on the board but never
+    auto-pick them, so a built slip is always a clean, valid lineup."""
+    return " + " in (edge.get("player") or "")
+
+
+def _clean_team(team: str | None) -> str | None:
+    """PP doubles the team string ('Uruguay Uruguay', 'IR Iran IR Iran')."""
+    if not team:
+        return team
+    words = team.split()
+    half = len(words) // 2
+    if half and len(words) % 2 == 0 and words[:half] == words[half:]:
+        return " ".join(words[:half])
+    return team
+
+
 def eligible_edges(edges: list[dict], provider: str) -> list[dict]:
-    """Engine-liked picks the chosen provider actually offers."""
+    """Engine-liked, single-player picks the chosen provider actually offers."""
     out = []
     for edge in edges:
         if (edge.get("verdict") or "").upper() not in ENGINE_LIKES:
             continue
+        if _is_combo(edge):
+            continue  # combos can't be auto-built into a valid lineup
         if provider == "UD" and not edge.get("underdog"):
             continue  # not on Underdog -> can't put it on an Underdog slip
         out.append(edge)
@@ -40,6 +60,37 @@ def eligible_edges(edges: list[dict], provider: str) -> list[dict]:
 
 def rank(edges: list[dict], metric: str) -> list[dict]:
     return sorted(edges, key=lambda e: _metric_value(e, metric), reverse=True)
+
+
+def _dedupe_players(edges: list[dict]) -> list[dict]:
+    """One prop per player — keep the best (list is already rank-ordered). PP
+    forbids the same player twice in a lineup."""
+    seen: set[str] = set()
+    out = []
+    for edge in edges:
+        player = edge.get("player") or ""
+        if player in seen:
+            continue
+        seen.add(player)
+        out.append(edge)
+    return out
+
+
+def select_valid_lineup(legs: list[dict], n: int) -> list[dict]:
+    """The top N legs that form a legal PrizePicks lineup: unique players (the
+    input is already player-deduped) spanning at least two different teams."""
+    chosen = legs[:n]
+    teams = {leg.get("team") for leg in chosen if leg.get("team")}
+    # PP requires >=2 distinct teams. If our top N are all one team, swap the
+    # weakest leg for the best available leg from a different team.
+    if len(chosen) >= 2 and len(teams) < 2:
+        alt = next(
+            (leg for leg in legs[n:] if leg.get("team") and leg["team"] not in teams),
+            None,
+        )
+        if alt:
+            chosen[-1] = alt
+    return chosen
 
 
 def _ai_side(rec: dict, provider: str) -> str:
@@ -59,7 +110,7 @@ def _leg(edge: dict, rec: dict, provider: str) -> dict:
     ud = edge.get("underdog") or {}
     return {
         "player": edge.get("player") or edge.get("dk_player_name"),
-        "team": edge.get("team"),
+        "team": _clean_team(edge.get("team")),
         "opponent": edge.get("opponent"),
         "game": edge.get("game"),
         "stat_type": edge.get("stat_type"),
@@ -108,7 +159,9 @@ def build_slip(
     metric = (metric or "ev").lower()
     n = max(1, int(n))
 
-    ranked = rank(eligible_edges(edges, provider), metric)
+    # Rank, then one prop per player BEFORE the AI step, so the shortlist spends
+    # its Claude calls on distinct players (not three lines of one player).
+    ranked = _dedupe_players(rank(eligible_edges(edges, provider), metric))
     shortlist = ranked[:shortlist_cap]
 
     if analyze_shortlist is None:
@@ -134,7 +187,10 @@ def build_slip(
             continue  # AI disagrees with the engine -> out
         legs.append(_leg(edge, rec, provider))
 
-    chosen = legs[:n]  # shortlist was ranked, so these are the strongest agreed legs
+    # The strongest agreed legs that form a legal lineup (unique players, >=2 teams).
+    chosen = select_valid_lineup(legs, n)
+    teams = {leg.get("team") for leg in chosen if leg.get("team")}
+    valid = len(chosen) >= 2 and len(teams) >= 2
     return {
         "provider": provider,
         "metric": metric,
@@ -144,5 +200,7 @@ def build_slip(
         "agreed": len(legs),
         "legs": chosen,
         "short": len(chosen) < n,
+        "team_count": len(teams),
+        "valid": valid,
         "correlations": _correlations(chosen),
     }

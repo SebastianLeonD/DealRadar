@@ -5,11 +5,11 @@ from engine.slip_builder import build_slip, eligible_edges, rank
 
 
 def _edge(player, play="OVER", verdict="YES", ev=10.0, win=0.60, pp_line=2.5,
-          underdog=None, game="Aland @ Brava"):
+          underdog=None, game="Aland @ Brava", team="Aland", stat="player_shots"):
     edge = {
         "player": player, "play": play, "verdict": verdict,
         "ev_percent": ev, "win_prob": win, "pp_line": pp_line,
-        "stat_type": "player_shots", "team": "Aland", "game": game,
+        "stat_type": stat, "team": team, "game": game,
     }
     if underdog is not None:
         edge["underdog"] = underdog
@@ -64,11 +64,67 @@ def test_no_padding_returns_short_slip():
 
 
 def test_takes_top_n_by_rank():
-    edges = [_edge("A", ev=5), _edge("B", ev=30), _edge("C", ev=15)]
+    edges = [_edge("A", ev=5, team="T1"), _edge("B", ev=30, team="T2"),
+             _edge("C", ev=15, team="T1")]
     recs = {p: _rec("OVER") for p in ("A", "B", "C")}
     slip = build_slip(edges, 2, metric="ev", analyze_shortlist=_analyzer(recs))
     assert [leg["player"] for leg in slip["legs"]] == ["B", "C"]  # best two
     assert slip["short"] is False
+    assert slip["valid"] is True  # two players, two teams
+
+
+# --- PrizePicks lineup validity ---
+
+def test_same_player_never_appears_twice():
+    # One player with two strong props, plus a second player. A valid lineup
+    # keeps the player's best prop once and fills the rest with others.
+    edges = [
+        _edge("Star", ev=40, team="T1", stat="player_shots"),
+        _edge("Star", ev=35, team="T1", stat="player_shots_on_target"),
+        _edge("Other", ev=20, team="T2"),
+    ]
+    recs = {"Star": _rec("OVER"), "Other": _rec("OVER")}
+    slip = build_slip(edges, 2, analyze_shortlist=_analyzer(recs))
+    players = [leg["player"] for leg in slip["legs"]]
+    assert players == ["Star", "Other"]  # Star appears exactly once
+    assert len(set(players)) == len(players)
+
+
+def test_lineup_must_span_two_teams():
+    # Top two by EV are the same team; the builder swaps in a different team.
+    edges = [
+        _edge("A", ev=40, team="Belgium"),
+        _edge("B", ev=30, team="Belgium"),
+        _edge("C", ev=10, team="Spain"),
+    ]
+    recs = {p: _rec("OVER") for p in ("A", "B", "C")}
+    slip = build_slip(edges, 2, analyze_shortlist=_analyzer(recs))
+    teams = {leg["team"] for leg in slip["legs"]}
+    assert len(teams) == 2 and slip["valid"] is True
+    assert "A" in [leg["player"] for leg in slip["legs"]]  # best leg kept
+
+
+def test_one_team_only_is_flagged_invalid():
+    edges = [_edge("A", ev=40, team="Belgium"), _edge("B", ev=30, team="Belgium")]
+    slip = build_slip(edges, 2, analyze_shortlist=_analyzer({"A": _rec("OVER"),
+                                                             "B": _rec("OVER")}))
+    assert slip["team_count"] == 1 and slip["valid"] is False
+
+
+def test_combos_are_never_picked():
+    edges = [
+        _edge("Solo", ev=10, team="T1"),
+        _edge("Aaron + Bo", ev=99, team="T1/T2"),  # combo: highest EV but excluded
+    ]
+    assert [e["player"] for e in eligible_edges(edges, "PP")] == ["Solo"]
+    slip = build_slip(edges, 2, analyze_shortlist=_analyzer({"Solo": _rec("OVER")}))
+    assert [leg["player"] for leg in slip["legs"]] == ["Solo"]
+
+
+def test_messy_team_string_is_cleaned():
+    edge = _edge("X", team="Uruguay Uruguay")
+    slip = build_slip([edge], 1, analyze_shortlist=_analyzer({"X": _rec("OVER")}))
+    assert slip["legs"][0]["team"] == "Uruguay"
 
 
 def test_failed_ai_call_is_dropped_not_crashed():

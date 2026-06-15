@@ -228,6 +228,8 @@ export interface Slip {
   agreed: number;
   legs: SlipLeg[];
   short: boolean;
+  team_count: number;
+  valid: boolean;
   correlations: { game: string; players: string[] }[];
 }
 
