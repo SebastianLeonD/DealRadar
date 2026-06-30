@@ -134,6 +134,15 @@ EDGES_MIGRATION_COLUMNS = {
     'sport': 'TEXT',
     'line_band': 'TEXT',
     'snapshot_bucket': 'TEXT',
+    # Shadow prediction (council Phase-2): the ASSERTED FBref Poisson model's
+    # P(over) logged beside the market number. FLAGS NOTHING — it only feeds the
+    # calibration gate, which decides if/when it earns the right to flag a bet.
+    'model_p': 'REAL',                      # model P(over the line), un-folded
+    'model_p_side': 'REAL',                 # folded to the bet side (compare vs win_prob)
+    'model_lambda': 'REAL',                 # Poisson rate the prediction rests on
+    'model_credibility': 'REAL',            # 0..1 player-vs-baseline shrink weight
+    'model_n_matches': 'INTEGER',           # FBref appearances behind the prior
+    'model_source': 'TEXT',                 # 'fbref_poisson_prior' | NULL
 }
 
 
@@ -472,9 +481,12 @@ def log_edges(
                     consensus_p, consensus_push_mass, baseline_p, baseline_book,
                     baseline_hold, win_prob_raw, game_id, game_date, sport,
                     line_band, snapshot_bucket, flagged_at,
-                    pp_captured_at, dk_captured_at
+                    pp_captured_at, dk_captured_at,
+                    model_p, model_p_side, model_lambda, model_credibility,
+                    model_n_matches, model_source
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     edge['pp_player_name'],
@@ -512,6 +524,12 @@ def log_edges(
                     timestamp,
                     edge.get('pp_captured_at'),
                     edge.get('dk_captured_at'),
+                    edge.get('model_p'),
+                    edge.get('model_p_side'),
+                    edge.get('model_lambda'),
+                    edge.get('model_credibility'),
+                    edge.get('model_n_matches'),
+                    edge.get('model_source'),
                 ),
             )
         connection.commit()

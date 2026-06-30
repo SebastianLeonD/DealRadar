@@ -33,6 +33,7 @@ from engine.probability import (
     prob_over_at_line,
 )
 from engine.config import snapshot_bucket as _snapshot_bucket
+from engine.shadow_model import NULL_FIELDS, load_fbref_logs, model_eligible, model_fields
 from engine.sports import active_sport_key, get_sport
 from scrapers.injuries_api import get_injury_map, injury_status, is_risky_status
 from storage.db_manager import get_latest_props, get_sharp_ladders, ingest_staging, log_edges
@@ -284,6 +285,25 @@ def find_edges(sync_staging: bool = True):
 
     derived_stats = sport.get('derived_stats', {})
 
+    # Shadow model (council Phase-2): load FBref logs once, best-effort. Soccer
+    # only; any failure -> {} so every model_* field logs NULL and the market
+    # path is untouched. Player names are resolved through the same fuzzy matcher.
+    logs_by_player = (
+        load_fbref_logs(season=sport.get('fbref_season', '2026'))
+        if sport.get('sources', {}).get('rate_prior') == 'fbref' else {}
+    )
+    _log_names = list(logs_by_player)
+    _log_match_cache: dict[str, str | None] = {}
+
+    def _logs_for(name: str) -> list[dict]:
+        if not logs_by_player:
+            return []
+        if name not in _log_match_cache:
+            matched, _ = match_player_name(name, _log_names)
+            _log_match_cache[name] = matched
+        matched = _log_match_cache[name]
+        return logs_by_player.get(matched, []) if matched else []
+
     for stat_type, model in sport['stat_models'].items():
         pp_data = get_latest_props('PP', stat_type)
         if not pp_data:
@@ -302,6 +322,8 @@ def find_edges(sync_staging: bool = True):
             extra_flags = [
                 f"Modeled from full-match prices (rate x {rate_scale}) — no 1H market exists"
             ]
+
+        eligible = model_eligible(stat_type, derived=bool(derived))
 
         ladders = get_sharp_ladders(ladder_stat)
         if not ladders:
@@ -337,6 +359,14 @@ def find_edges(sync_staging: bool = True):
 
             if not evaluation or evaluation['win_prob'] < BREAKEVEN_PROB:
                 continue
+
+            # Shadow column: the model's P(over) beside the market number. Base
+            # soccer stats only, never combos; missing logs -> NULL. Flags nothing.
+            if eligible and ' + ' not in pp_name:
+                mf = model_fields(_logs_for(sharp_name), stat_type, pp_line,
+                                  evaluation['play'])
+            else:
+                mf = dict(NULL_FIELDS)
 
             flagged_bets.append({
                 # Display keys (dashboard/CSV compatibility)
@@ -386,6 +416,7 @@ def find_edges(sync_staging: bool = True):
                 'commence_time': evaluation['commence_time'],
                 'pp_captured_at': pp_player.get('captured_at'),
                 'dk_captured_at': evaluation['sharp_captured_at'],
+                **mf,
             })
 
     if not priced_any:
