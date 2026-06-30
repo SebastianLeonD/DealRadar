@@ -27,7 +27,9 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from engine.probability import devig_one_sided, devig_power, implied_prob
+from engine.config import DEFAULT_DEVIG_METHOD
+from engine.devig import devig_two_sided
+from engine.probability import devig_one_sided, implied_prob
 from engine.sports import get_sport
 
 load_dotenv()
@@ -71,11 +73,18 @@ def flatten_binary_market(market, binary_config, game_label, commence_time, book
         prices.setdefault(player, {})[outcome['name']] = outcome['price']
 
     for player, sides in prices.items():
+        price_over = price_under = None
+        method = shin_z = hold = None
         if 'Yes' in sides and 'No' in sides:
-            tp_over, tp_under = devig_power(sides['Yes'], sides['No'])
+            dv = devig_two_sided(sides['Yes'], sides['No'], DEFAULT_DEVIG_METHOD)
+            tp_over, tp_under = dv['p_over'], dv['p_under']
+            price_over, price_under = sides['Yes'], sides['No']
+            method, shin_z, hold = dv['devig_method'], dv['z'], dv['hold']
         elif 'Yes' in sides:
             tp_over = devig_one_sided(sides['Yes'], binary_config['margin'])
             tp_under = 1 - tp_over
+            price_over = sides['Yes']
+            method = 'one_sided'
         else:
             continue
         records.append({
@@ -87,6 +96,11 @@ def flatten_binary_market(market, binary_config, game_label, commence_time, book
             'Commence_Time': commence_time,
             'True_Over_Prob': round(tp_over * 100, 2),
             'True_Under_Prob': round(tp_under * 100, 2),
+            'Price_Over': price_over,
+            'Price_Under': price_under,
+            'Devig_Method': method,
+            'Shin_Z': round(shin_z, 4) if shin_z is not None else None,
+            'Hold': round(hold, 4) if hold is not None else None,
         })
     return records
 
@@ -192,14 +206,21 @@ def flatten_game(game, game_odds, sport: dict):
                 for line, prices in lines.items():
                     if milestones and float(line) == int(line):
                         line = float(line) - 0.5  # "Over 2" means 2+, i.e. X > 1.5
+                    price_over = prices.get('Over')
+                    price_under = prices.get('Under')
+                    method = shin_z = hold = None
                     if 'Over' in prices and 'Under' in prices:
-                        tp_over, tp_under = devig_power(prices['Over'], prices['Under'])
+                        dv = devig_two_sided(prices['Over'], prices['Under'], DEFAULT_DEVIG_METHOD)
+                        tp_over, tp_under = dv['p_over'], dv['p_under']
+                        method, shin_z, hold = dv['devig_method'], dv['z'], dv['hold']
                     elif 'Over' in prices:
                         tp_over = devig_one_sided(prices['Over'], margin)
                         tp_under = 1 - tp_over
+                        method = 'one_sided'
                     elif 'Under' in prices:
                         tp_under = devig_one_sided(prices['Under'], margin)
                         tp_over = 1 - tp_under
+                        method = 'one_sided'
                     else:
                         continue
 
@@ -212,6 +233,11 @@ def flatten_game(game, game_odds, sport: dict):
                         'Commence_Time': commence_time,
                         'True_Over_Prob': round(tp_over * 100, 2),
                         'True_Under_Prob': round(tp_under * 100, 2),
+                        'Price_Over': price_over,
+                        'Price_Under': price_under,
+                        'Devig_Method': method,
+                        'Shin_Z': round(shin_z, 4) if shin_z is not None else None,
+                        'Hold': round(hold, 4) if hold is not None else None,
                     })
 
     return records

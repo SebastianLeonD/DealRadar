@@ -16,6 +16,16 @@ CREATE TABLE IF NOT EXISTS props (
     line REAL NOT NULL,
     true_over_prob REAL,
     true_under_prob REAL,
+    price_over INTEGER,
+    price_under INTEGER,
+    devig_method TEXT,
+    shin_z REAL,
+    hold REAL,
+    league TEXT,
+    league_id TEXT,
+    sport_key TEXT,
+    game_id TEXT,
+    fetch_status TEXT NOT NULL DEFAULT 'ok',
     source TEXT NOT NULL CHECK(source IN ('DK', 'PP')),
     bookmaker TEXT NOT NULL DEFAULT 'draftkings',
     game TEXT,
@@ -45,6 +55,9 @@ CREATE TABLE IF NOT EXISTS edges (
     result TEXT,
     actual_value REAL,
     settled_at TEXT,
+    consensus_n INTEGER,
+    consensus_tag TEXT,
+    config_version TEXT,
     flagged_at TEXT NOT NULL,
     pp_captured_at TEXT,
     dk_captured_at TEXT
@@ -71,6 +84,19 @@ CREATE INDEX IF NOT EXISTS idx_edges_unsettled
 PROPS_MIGRATION_COLUMNS = {
     'bookmaker': "TEXT NOT NULL DEFAULT 'draftkings'",
     'commence_time': 'TEXT',
+    # Council OBJ-7: persist the raw American prices + de-vig provenance so any
+    # true prob is recompute-attributable (the bake-off needs the raw odds).
+    'price_over': 'INTEGER',
+    'price_under': 'INTEGER',
+    'devig_method': 'TEXT',
+    'shin_z': 'REAL',
+    'hold': 'REAL',
+    # Multi-sport seam (OBJ-4/7) + typed fetch failures (OBJ http-robustness).
+    'league': 'TEXT',
+    'league_id': 'TEXT',
+    'sport_key': 'TEXT',
+    'game_id': 'TEXT',
+    'fetch_status': "TEXT NOT NULL DEFAULT 'ok'",
 }
 
 EDGES_MIGRATION_COLUMNS = {
@@ -83,6 +109,10 @@ EDGES_MIGRATION_COLUMNS = {
     'result': 'TEXT',
     'actual_value': 'REAL',
     'settled_at': 'TEXT',
+    # Consensus provenance + reproducibility stamp (OBJ-1/3, OBJ-41).
+    'consensus_n': 'INTEGER',
+    'consensus_tag': 'TEXT',
+    'config_version': 'TEXT',
 }
 
 
@@ -139,18 +169,40 @@ def upsert_prop(
     game: str | None = None,
     bookmaker: str = 'draftkings',
     commence_time: str | None = None,
+    price_over: int | None = None,
+    price_under: int | None = None,
+    devig_method: str | None = None,
+    shin_z: float | None = None,
+    hold: float | None = None,
+    league: str | None = None,
+    league_id: str | None = None,
+    sport_key: str | None = None,
+    game_id: str | None = None,
+    fetch_status: str = 'ok',
 ) -> None:
     connection.execute(
         """
         INSERT INTO props (
             player_name, team, stat_type, line,
-            true_over_prob, true_under_prob, source, bookmaker,
+            true_over_prob, true_under_prob, price_over, price_under,
+            devig_method, shin_z, hold, league, league_id, sport_key,
+            game_id, fetch_status, source, bookmaker,
             game, commence_time, captured_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(player_name, stat_type, source, bookmaker, line) DO UPDATE SET
             team = excluded.team,
             true_over_prob = excluded.true_over_prob,
             true_under_prob = excluded.true_under_prob,
+            price_over = excluded.price_over,
+            price_under = excluded.price_under,
+            devig_method = excluded.devig_method,
+            shin_z = excluded.shin_z,
+            hold = excluded.hold,
+            league = excluded.league,
+            league_id = excluded.league_id,
+            sport_key = excluded.sport_key,
+            game_id = excluded.game_id,
+            fetch_status = excluded.fetch_status,
             game = excluded.game,
             commence_time = excluded.commence_time,
             captured_at = excluded.captured_at
@@ -162,6 +214,16 @@ def upsert_prop(
             line,
             true_over_prob,
             true_under_prob,
+            price_over,
+            price_under,
+            devig_method,
+            shin_z,
+            hold,
+            league,
+            league_id,
+            sport_key,
+            game_id,
+            fetch_status,
             source,
             bookmaker,
             game,
@@ -196,6 +258,16 @@ def ingest_draftkings(
                 line=float(record['Line']),
                 true_over_prob=float(record['True_Over_Prob']),
                 true_under_prob=float(record['True_Under_Prob']),
+                price_over=record.get('Price_Over'),
+                price_under=record.get('Price_Under'),
+                devig_method=record.get('Devig_Method'),
+                shin_z=record.get('Shin_Z'),
+                hold=record.get('Hold'),
+                league=record.get('League'),
+                league_id=record.get('League_Id'),
+                sport_key=record.get('Sport_Key'),
+                game_id=record.get('Game_Id'),
+                fetch_status=record.get('Fetch_Status', 'ok'),
                 source='DK',
                 bookmaker=record.get('Bookmaker', 'draftkings'),
                 game=record.get('Game'),
@@ -324,6 +396,11 @@ def log_edges(
     timestamp = flagged_at or utc_now()
     inserted = 0
 
+    try:  # reproducibility stamp (OBJ-41); never let it block ingestion
+        from engine.config import CONFIG_VERSION
+    except Exception:
+        CONFIG_VERSION = None
+
     with get_connection(db_path) as connection:
         for edge in edges:
             # Re-running the matcher must not duplicate an open play:
@@ -346,9 +423,10 @@ def log_edges(
                     pp_player_name, dk_player_name, team, stat_type, play,
                     pp_line, dk_line_at_flag, edge_type, dk_over_prob,
                     dk_under_prob, probability_text, win_prob, ev_percent,
-                    verdict, flags, book_count, commence_time, flagged_at,
+                    verdict, flags, book_count, commence_time,
+                    consensus_n, consensus_tag, config_version, flagged_at,
                     pp_captured_at, dk_captured_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     edge['pp_player_name'],
@@ -368,6 +446,9 @@ def log_edges(
                     edge.get('flags'),
                     edge.get('book_count'),
                     edge.get('commence_time'),
+                    edge.get('consensus_n'),
+                    edge.get('consensus_tag'),
+                    CONFIG_VERSION,
                     timestamp,
                     edge.get('pp_captured_at'),
                     edge.get('dk_captured_at'),
