@@ -292,6 +292,18 @@ def test_strata_collapse_order():
     assert 1 in levels
 
 
+def test_strata_floor_never_drops_a_game():
+    # Even a cluster whose legs disagree on sport (data-model-impossible, but the
+    # floor must be defensive) is emitted, never silently dropped.
+    legs = [
+        _leg("MIX", 0.6, 0.5, 1, sport="nba", lid="a"),
+        _leg("MIX", 0.6, 0.5, 0, sport="world_cup", lid="b"),
+    ]
+    strata = assign_strata(legs, min_independent_games=200)
+    emitted = {m.cluster for _, _, members in strata for m in members}
+    assert "MIX" in emitted
+
+
 def test_line_band_float_safe():
     assert line_band("player_points", 20.4999996) == "mid"
     assert line_band("player_points", 9.5) == "low"
@@ -340,6 +352,30 @@ def test_classify_pending_insufficient():
 
 def test_classify_pending_favorable_not_sig():
     assert classify(True, False, True, -0.01) == "PENDING"
+
+
+def test_classify_abstained_test_is_pending_not_failed():
+    # Degenerate-d abstain: the bootstrap returns a non-None point (0.0) but
+    # p_value=None. With tested=False the stratum must be PENDING, never FAILED.
+    assert classify(True, False, True, 0.0, tested=False) == "PENDING"
+    assert classify(True, False, None, 0.0, tested=False) == "PENDING"
+
+
+def test_run_calibration_degenerate_stratum_pending():
+    # >=200 games where consensus == baseline on every leg -> every d == 0 ->
+    # the Brier bootstrap abstains -> verdict PENDING, not FAILED.
+    rng = random.Random(4)
+    legs = []
+    for g in range(210):
+        for j in range(2):
+            p = rng.uniform(0.3, 0.7)
+            y = 1 if rng.random() < p else 0
+            legs.append(_leg(f"G{g}", p, p, y, lid=f"G{g}-{j}"))  # consensus == baseline
+    from engine.calibration import run_calibration
+    res = run_calibration(legs=legs)
+    top = res["strata"][0]
+    assert top.brier_p is None              # abstained
+    assert top.verdict == "PENDING"         # not FAILED
 
 
 # ---- quantiles / determinism ----------------------------------------------

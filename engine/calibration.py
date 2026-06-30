@@ -492,7 +492,14 @@ def assign_strata(
         for cluster, glegs in remaining.items():
             key = _game_level_key(glegs, level)
             if key is None:
-                continue  # legs disagree at this level -> consider at a coarser one
+                if level == 3:
+                    # Defensive: the floor must never silently drop a game. The
+                    # data model keeps sport invariant within a cluster, but if a
+                    # cluster's legs ever disagreed on sport, bucket by the first
+                    # leg's sport rather than losing it.
+                    key = (glegs[0].sport,)
+                else:
+                    continue  # legs disagree at this level -> coarser level
             groups.setdefault(key, []).append(cluster)
 
         for key, clusters in groups.items():
@@ -542,15 +549,23 @@ def select_sharpest_book(
 # ---------------------------------------------------------------------------
 # Verdict classification + time-to-first-verdict
 # ---------------------------------------------------------------------------
-def classify(games_met: bool, bh_rejected: bool, slope_ok, point_mean_d) -> str:
+def classify(games_met: bool, bh_rejected: bool, slope_ok, point_mean_d, tested=None) -> str:
     """Co-primary verdict. CALIBRATED iff the games floor is met AND the paired-
     Brier FDR test rejects AND the reliability slope covers 1.0. FAILED iff the
-    test ran and consensus failed to beat baseline or the slope decisively
-    excludes 1.0. PENDING otherwise (insufficient or favorable-not-significant).
+    Brier test actually RAN and consensus failed to beat baseline, or the slope
+    decisively excludes 1.0. PENDING otherwise (insufficient, abstained, or
+    favorable-not-significant).
+
+    `tested` is whether the Brier bootstrap produced a usable p-value (did not
+    abstain). It MUST be gated on the p-value, not the point estimate: the
+    degenerate-d abstention path still returns a (non-None) point mean of 0, so
+    using the point as the "ran" signal would mislabel an abstained stratum as
+    FAILED. When tested is None it is derived from point_mean_d for convenience.
     """
+    if tested is None:
+        tested = point_mean_d is not None
     if games_met and bh_rejected and slope_ok is True:
         return "CALIBRATED"
-    tested = point_mean_d is not None
     if games_met and tested and not bh_rejected and (
         (point_mean_d is not None and point_mean_d >= 0) or slope_ok is False
     ):
@@ -681,7 +696,10 @@ def run_calibration(
 
     verdicts: list[StratumVerdict] = []
     for i, (level, key, members, n_games, games_met, bp, sl) in enumerate(interim):
-        verdict = classify(games_met, rejected[i], sl["slope_ok"], bp.get("point"))
+        # "tested" gates on the p-value, not the point: a degenerate-d abstain
+        # returns a non-None point but p_value=None and must stay PENDING.
+        ran = bp.get("p_value") is not None
+        verdict = classify(games_met, rejected[i], sl["slope_ok"], bp.get("point"), tested=ran)
         verdicts.append(StratumVerdict(
             level=level, key=key, verdict=verdict,
             n_independent_games=n_games, n_legs=len(members),
