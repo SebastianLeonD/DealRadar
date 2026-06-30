@@ -117,6 +117,18 @@ SPORTS = {
         # Books post soccer props as milestones: "Over 2.0" means 2+, i.e.
         # X > 1.5. Normalize integer lines to half-lines at flatten time.
         'integer_lines_are_milestones': True,
+        # Per-sport source registry (council OBJ-19/20). FBref supplies realized
+        # shots/SoT/goals/minutes for settlement and the cold-start rate prior;
+        # the model it feeds is asserted and gated by the calibration loop.
+        # Pre-match lineups (the start/minutes signal FBref lacks) come from a
+        # separate feed (FotMob/Sofascore) that is not yet wired.
+        'sources': {
+            'settlement': ['fbref', 'espn'],   # fbref primary, espn fallback
+            'rate_prior': 'fbref',
+            'fbref_league': 'INT-World Cup',
+            'lineup': None,                    # TODO: FotMob/Sofascore confirmed XI
+        },
+        'model': 'fbref_poisson_prior',        # asserted; must clear Phase 2
     },
 }
 
