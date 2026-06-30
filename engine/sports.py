@@ -78,6 +78,13 @@ SPORTS = {
             'Assists': 'player_assists',
             'Goals': 'player_goals',
             'Goalie Saves': 'player_goalie_saves',
+            # Model-priced stats (no book line) — projected from World Cup form.
+            'Fouls': 'player_fouls',
+            'Fouls Drawn': 'player_fouls_drawn',
+            'Tackles': 'player_tackles',
+            'Crosses': 'player_crosses',
+            'Offsides': 'player_offsides',
+            'Goals Allowed': 'player_goals_allowed',
         },
         'stat_models': {
             'player_shots': 'poisson',
@@ -89,6 +96,13 @@ SPORTS = {
             'player_shots_on_target_1h': 'poisson',
             'player_goals_1h': 'poisson',
             'player_goalie_saves_1h': 'poisson',
+            # Model-priced stats (FBref form, no book line)
+            'player_fouls': 'poisson',
+            'player_fouls_drawn': 'poisson',
+            'player_tackles': 'poisson',
+            'player_crosses': 'poisson',
+            'player_offsides': 'poisson',
+            'player_goals_allowed': 'poisson',
         },
         # PP posts its standard soccer board as FIRST-HALF props. No book
         # offers 1H player markets, so these are derived from full-match

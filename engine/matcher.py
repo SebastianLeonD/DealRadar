@@ -26,21 +26,47 @@ from engine.portfolio import construct_slips
 from engine.probability import (
     BREAKEVEN_PROB,
     assign_verdict,
-    consensus_probability,
     ev_percent,
     fit_lambda_from_anchor,
     poisson_p_over_push_adjusted,
     prob_over_at_line,
+    tiered_consensus,
 )
 from engine.config import snapshot_bucket as _snapshot_bucket
+from engine.projections import load_fbref_stats, model_stat_types, project_prop
 from engine.shadow_model import NULL_FIELDS, load_fbref_logs, model_eligible, model_fields
 from engine.sports import active_sport_key, get_sport
 from scrapers.injuries_api import get_injury_map, injury_status, is_risky_status
-from storage.db_manager import get_latest_props, get_sharp_ladders, ingest_staging, log_edges
+from storage.db_manager import (
+    get_game_commence_map,
+    get_latest_props,
+    get_sharp_ladders,
+    ingest_staging,
+    log_edges,
+)
 
 STALE_GAP_MINUTES = 45      # PP capture older than sharp capture by this much
 BOOK_DISAGREEMENT = 0.07    # max spread in P(over) between books
 LARGE_LINE_GAP = 2.5        # PP vs closest sharp line, in points
+
+# Pick'em apps, not sharp sportsbooks: usable to price stats the books ignore,
+# but a play sourced ONLY from these is soft — flag it so the verdict caps at
+# LEAN (no soft-only play is ever a confident YES).
+SOFT_BOOKS = {"underdog"}
+SOFT_ONLY_FLAG = "Priced off Underdog (a pick'em app, not a sharp book) — soft line"
+
+# How much a soft pick'em line is allowed to pull the TRUTH estimate when a
+# sharp book also prices the prop. 0 = sharp books decide the probability and
+# Underdog is a venue/line-shop signal only. Bump this (e.g. 0.25) only with
+# settled-bet evidence that the soft line adds predictive signal.
+SOFT_BOOK_WEIGHT = 0.0
+
+
+def _split_books(book_probs: dict[str, float]) -> tuple[dict, dict]:
+    """Partition de-vigged book probabilities into sharp and soft tiers."""
+    sharp = {b: p for b, p in book_probs.items() if b not in SOFT_BOOKS}
+    soft = {b: p for b, p in book_probs.items() if b in SOFT_BOOKS}
+    return sharp, soft
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -119,7 +145,8 @@ def evaluate_player(
     if not book_probs:
         return None
 
-    consensus_over, spread = consensus_probability(book_probs)
+    sharp_probs, soft_probs = _split_books(book_probs)
+    consensus_over, spread = tiered_consensus(sharp_probs, soft_probs, SOFT_BOOK_WEIGHT)
     play = 'OVER' if consensus_over >= 0.5 else 'UNDER'
     win_prob = consensus_over if play == 'OVER' else 1 - consensus_over
 
@@ -146,8 +173,20 @@ def evaluate_player(
     sharp = select_sharpest_book(exact_line_probs) if exact_line_probs else None
     baseline_book, baseline_p = sharp if sharp else (None, None)
 
-    # Anchor line for display/CLV: DraftKings' closest line, else first book's.
-    anchor_book = 'draftkings' if 'draftkings' in books else next(iter(books))
+    # Books actually backing the probability: sharp tier when present (soft only
+    # joins if it's weighted in), else the soft tier we fell back on.
+    if sharp_probs:
+        truth_books = {**sharp_probs, **soft_probs} if SOFT_BOOK_WEIGHT > 0 else sharp_probs
+    else:
+        truth_books = soft_probs
+
+    # Anchor line for display/CLV: DraftKings', else any sharp book's, else
+    # whatever we have — a soft line only when no sharp book quotes this prop.
+    if 'draftkings' in books:
+        anchor_book = 'draftkings'
+    else:
+        sharp_in_books = [b for b in books if b not in SOFT_BOOKS]
+        anchor_book = sharp_in_books[0] if sharp_in_books else next(iter(books))
     anchor_line = min(
         (line for line, _ in books[anchor_book]['points']),
         key=lambda line: abs(line - pp_line),
@@ -163,6 +202,8 @@ def evaluate_player(
     flags = build_trap_flags(pp_player, latest_capture, line_gap, spread, injury)
     if extra_flags:
         flags = extra_flags + flags
+    if not sharp_probs:
+        flags = [SOFT_ONLY_FLAG] + flags
     verdict = assign_verdict(win_prob, flags)
 
     return {
@@ -171,7 +212,7 @@ def evaluate_player(
         'ev_percent': ev_percent(win_prob),
         'verdict': verdict,
         'flags': flags,
-        'book_count': len(book_probs),
+        'book_count': len(truth_books),
         'consensus_over': consensus_over,
         'consensus_n': cons['consensus_n'],
         'consensus_tag': cons['consensus_tag'],
@@ -241,14 +282,22 @@ def evaluate_combo(
         book_probs[book] = poisson_p_over_push_adjusted(lam_total * rate_scale, pp_line)
         anchor_total = lam_total  # last book's rate as display anchor
 
-    consensus_over, spread = consensus_probability(book_probs)
+    sharp_probs, soft_probs = _split_books(book_probs)
+    consensus_over, spread = tiered_consensus(sharp_probs, soft_probs, SOFT_BOOK_WEIGHT)
     play = 'OVER' if consensus_over >= 0.5 else 'UNDER'
     win_prob = consensus_over if play == 'OVER' else 1 - consensus_over
+
+    if sharp_probs:
+        truth_books = {**sharp_probs, **soft_probs} if SOFT_BOOK_WEIGHT > 0 else sharp_probs
+    else:
+        truth_books = soft_probs
 
     flags = list(extra_flags)
     flags.append('Combo: correlation between legs not modeled')
     if spread > BOOK_DISAGREEMENT:
         flags.append(f'Books disagree by {spread * 100:.0f}% — market unsettled')
+    if not sharp_probs:
+        flags.append(SOFT_ONLY_FLAG)
 
     evaluation = {
         'play': play,
@@ -256,7 +305,7 @@ def evaluate_combo(
         'ev_percent': ev_percent(win_prob),
         'verdict': assign_verdict(win_prob, flags),
         'flags': flags,
-        'book_count': len(book_probs),
+        'book_count': len(truth_books),
         'consensus_over': consensus_over,
         'spread': spread,
         'anchor_line': round(anchor_total * rate_scale, 2),  # modeled combined rate
@@ -265,6 +314,98 @@ def evaluate_combo(
         'commence_time': commence_time,
     }
     return evaluation, ' + '.join(matched_legs), worst_score
+
+
+def _resolve_kickoff(team: str | None, games: list[dict]) -> tuple[str | None, str | None]:
+    """Find the DK game whose 'Away @ Home' string names this team."""
+    if not team:
+        return None, None
+    needle = team.strip().lower()
+    for game in games:
+        for side in game['game'].split('@'):
+            side = side.strip().lower()
+            if side and (side in needle or needle in side):
+                return game['commence_time'], game['game']
+    return None, None
+
+
+def price_model_edges(sport: dict, flagged_bets: list[dict]) -> bool:
+    """Price PP stats the books don't post against each player's World Cup form.
+
+    Appends qualifying plays to flagged_bets. Returns True if any model stat had
+    PP props to price (so the caller knows pricing happened).
+    """
+    model_stats = [s for s in model_stat_types() if s in sport['stat_models']]
+    players = load_fbref_stats() if model_stats else []
+    if not players:
+        return False
+
+    games = get_game_commence_map()
+    priced = False
+
+    for stat_type in model_stats:
+        # If a market now prices this stat (e.g. Underdog), use it — don't
+        # double-log a weaker form-model play for the same prop.
+        if get_sharp_ladders(stat_type):
+            continue
+        pp_data = get_latest_props('PP', stat_type)
+        if not pp_data:
+            continue
+        priced = True
+        modeled = 0
+
+        for pp_player in pp_data:
+            pp_name = pp_player['player_name']
+            if ' + ' in pp_name:
+                continue  # combos not modeled for form-based stats yet
+            proj = project_prop(pp_name, stat_type, pp_player['line'], players)
+            if not proj or proj['win_prob'] < BREAKEVEN_PROB:
+                continue
+
+            kickoff, _ = _resolve_kickoff(pp_player.get('team') or proj.get('team'), games)
+            flagged_bets.append({
+                'Player': pp_name,
+                'DK_Player': proj['matched_name'],
+                'Match_Score': proj['match_score'],
+                'Team': pp_player['team'],
+                'Stat': stat_type,
+                'Play': proj['play'],
+                'PP_Line': pp_player['line'],
+                'DK_Line': proj['expected'],
+                'Probability': f"{proj['win_prob'] * 100:.1f}% true win",
+                'Edge_Type': 'Form Model',
+                'pp_player_name': pp_name,
+                'dk_player_name': proj['matched_name'],
+                'team': pp_player['team'],
+                'stat_type': stat_type,
+                'play': proj['play'],
+                'pp_line': pp_player['line'],
+                'dk_line_at_flag': proj['expected'],
+                'edge_type': 'Form Model',
+                'dk_over_prob': round(proj['win_prob'] * 100, 2)
+                if proj['play'] == 'OVER' else round((1 - proj['win_prob']) * 100, 2),
+                'dk_under_prob': round((1 - proj['win_prob']) * 100, 2)
+                if proj['play'] == 'OVER' else round(proj['win_prob'] * 100, 2),
+                'probability_text': (
+                    f"{proj['win_prob'] * 100:.1f}% true "
+                    f"(modeled from {proj['games']} game(s))"
+                ),
+                'win_prob': proj['win_prob'],
+                'ev_percent': proj['ev_percent'],
+                'verdict': proj['verdict'],
+                'flags': ' | '.join(proj['flags']) or None,
+                'book_count': None,
+                'commence_time': kickoff,
+                'pp_captured_at': pp_player.get('captured_at'),
+                'dk_captured_at': None,
+            })
+            modeled += 1
+
+        if modeled:
+            print(f"Modeled {modeled} {stat_type.replace('player_', '')} play(s) "
+                  "from World Cup form.")
+
+    return priced
 
 
 def find_edges(sync_staging: bool = True):
@@ -418,6 +559,10 @@ def find_edges(sync_staging: bool = True):
                 'dk_captured_at': evaluation['sharp_captured_at'],
                 **mf,
             })
+
+    # --- Model-priced stats (no book market): project from World Cup form ---
+    if price_model_edges(sport, flagged_bets):
+        priced_any = True
 
     if not priced_any:
         print("Make sure both sharp and PP props exist in the database.")

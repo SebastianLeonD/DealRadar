@@ -103,6 +103,20 @@ def pipeline_full():
     return {"success": success, "output": output}
 
 
+@app.post("/api/pipeline/fetch-form")
+def pipeline_fetch_form():
+    wc_ok, wc_out = run_script("scrapers/fbref_stats.py")
+    club_ok, club_out = run_script("scrapers/fbref_club_stats.py")
+    output = f"{wc_out}\n\n{club_out}".strip()
+    return {"success": wc_ok and club_ok, "output": output or "Form stats updated."}
+
+
+@app.post("/api/pipeline/fetch-underdog")
+def pipeline_fetch_underdog():
+    success, output = run_script("scrapers/underdog_api.py")
+    return {"success": success, "output": output or "Underdog board updated."}
+
+
 @app.post("/api/pipeline/settle")
 def pipeline_settle():
     success, output = run_script("engine/settlement.py")
@@ -114,35 +128,308 @@ class AnalyzeRequest(BaseModel):
 
     player: str | None = None
     pp_player_name: str | None = None
+    dk_player_name: str | None = None
     team: str | None = None
+    opponent: str | None = None
+    game: str | None = None
     stat_type: str | None = None
     play: str | None = None
     pp_line: float | None = None
     dk_line: float | None = None
+    ud_line: float | None = None
     dk_line_at_flag: float | None = None
     edge_type: str | None = None
     verdict: str | None = None
     win_prob: float | None = None
     ev_percent: float | None = None
     book_count: int | None = None
+    commence_time: str | None = None
     flags: str | None = None
+    mode: str = "full"  # "full" (with sharp books) or "stats_only" (PrizePicks-only)
+
+
+def _with_matchup(edge: dict) -> dict:
+    """Fill in the opponent/game so the analyst always knows the matchup."""
+    from engine.ai_analyst import opponent_from_game
+    from storage.db_manager import get_player_game_map
+
+    if not edge.get("game"):
+        player = edge.get("dk_player_name") or edge.get("player")
+        edge["game"] = get_player_game_map().get(player, "")
+    if not edge.get("opponent"):
+        edge["opponent"] = opponent_from_game(edge.get("game"), edge.get("team"))
+    return edge
+
+
+@app.post("/api/edges/prompt")
+def preview_prompt(req: AnalyzeRequest):
+    """Show exactly what would be sent to Claude — no model call, no billing."""
+    from engine.ai_analyst import describe_request
+
+    payload = req.model_dump()
+    mode = payload.pop("mode", "full")
+    edge = _with_matchup(payload)
+    return {"ok": True, "opponent": edge.get("opponent"),
+            "sent": describe_request(edge, mode=mode)}
 
 
 @app.post("/api/edges/analyze")
 def analyze_edge(req: AnalyzeRequest):
     """Second-opinion OVER/UNDER/PASS call from Claude (your subscription)."""
-    from engine.ai_analyst import analyze_play
+    from engine.ai_analyst import analyze_play, describe_request
+
+    payload = req.model_dump()
+    mode = payload.pop("mode", "full")
+    edge = _with_matchup(payload)
+    sent = describe_request(edge, mode=mode)
 
     try:
-        recommendation = analyze_play(req.model_dump())
-        return {"ok": True, "recommendation": recommendation}
+        recommendation = analyze_play(edge, mode=mode)
+        return {
+            "ok": True,
+            "recommendation": recommendation,
+            "opponent": edge.get("opponent"),
+            "sent": sent,
+        }
     except Exception as error:  # surface a clean message to the UI
-        return {"ok": False, "error": str(error)}
+        return {"ok": False, "error": str(error), "opponent": edge.get("opponent"), "sent": sent}
+
+
+class SlipRequest(BaseModel):
+    """Build me the best N-leg slip on this provider, ranked by this metric."""
+
+    n: int = 3
+    provider: str = "PP"  # "PP" (PrizePicks) | "UD" (Underdog)
+    metric: str = "ev"    # "ev" | "win"
+
+
+@app.post("/api/slip/build")
+def build_slip_endpoint(req: SlipRequest):
+    """Engine proposes, Claude disposes: the best N legs both back, or fewer.
+
+    The engine ranks its liked picks; Claude reviews the top candidates in
+    parallel and only legs it agrees with survive. No padding to hit N.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from engine import slip_builder
+    from engine.ai_analyst import analyze_play
+
+    frame = load_edges_dataframe("All", "All")
+    edges = frame.to_dict(orient="records") if not frame.empty else []
+    _attach_underdog(edges)
+    for edge in edges:
+        _with_matchup(edge)  # fill game/opponent so Claude knows the matchup
+
+    errors: list[str] = []
+
+    def analyze_shortlist(items):
+        def one(edge):
+            try:
+                return analyze_play(edge, mode="full")
+            except Exception as error:  # one bad leg shouldn't sink the slip
+                errors.append(str(error))
+                return None
+
+        if not items:
+            return []
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            return list(pool.map(one, items))
+
+    slip = slip_builder.build_slip(
+        edges, req.n, provider=req.provider, metric=req.metric,
+        analyze_shortlist=analyze_shortlist,
+    )
+    # If nothing survived AND every Claude call failed, that's an error, not an
+    # empty board — surface it so the UI can explain (e.g. CLI not logged in).
+    if not slip["legs"] and errors and len(errors) >= slip["considered"] > 0:
+        return {"ok": False, "error": errors[0], "slip": slip}
+    return {"ok": True, "slip": slip}
+
+
+@app.get("/api/prizepicks/board")
+def get_prizepicks_board():
+    """Every PrizePicks prop you pasted, grouped by stat type — the full menu,
+    including stats no sportsbook prices. `has_form_data` marks which stats the
+    AI has real numbers for (vs. ones it can only reason about generally)."""
+    import json
+    from collections import Counter, defaultdict
+    from datetime import datetime, timedelta, timezone
+
+    from engine import line_shop
+    from engine.projections import FORM_FIELD_BY_STAT
+    from services.pipeline import MATCH_OVER_HOURS
+
+    board_file = PROJECT_ROOT / "data" / "processed" / "pp_board.json"
+    if not board_file.exists():
+        return {"total": 0, "groups": [], "games": []}
+    with board_file.open() as file:
+        props = json.load(file)
+
+    # Drop props whose game already finished (~2h+ since kickoff). Upcoming and
+    # in-progress games stay; missing/unparseable times are kept, never hidden.
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=MATCH_OVER_HOURS)
+
+    def still_on(prop: dict) -> bool:
+        start = prop.get("start_time")
+        if not start:
+            return True
+        try:
+            kickoff = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        except ValueError:
+            return True
+        return kickoff >= cutoff
+
+    props = [prop for prop in props if still_on(prop)]
+
+    # Underdog line-shop: attach UD's line for the same player + stat.
+    ud_index = line_shop.build_index(line_shop.load_underdog())
+
+    # Engine overlay: the priced picks (verdict/win%/EV) keyed by player+stat+line,
+    # so a board prop the engine likes shows its verdict right on the card.
+    edge_index: dict[tuple, dict] = {}
+    edges_frame = load_edges_dataframe("All", "All")
+    if not edges_frame.empty:
+        for e in edges_frame.to_dict(orient="records"):
+            key = (line_shop.normalize(e.get("player") or ""), e.get("stat_type"), e.get("pp_line"))
+            edge_index[key] = e
+
+    def has_form(mapped: str | None) -> bool:
+        if not mapped:
+            return False
+        return mapped.replace("_1h", "") in FORM_FIELD_BY_STAT
+
+    grouped: dict[str, dict] = defaultdict(
+        lambda: {"props": [], "mapped_stat": None, "has_form_data": False}
+    )
+    for prop in props:
+        g = grouped[prop["stat_type"]]
+        g["mapped_stat"] = prop.get("mapped_stat")
+        g["has_form_data"] = has_form(prop.get("mapped_stat"))
+        ud = line_shop.match_prop(
+            prop["name"],
+            line_shop.normalize(prop["name"]),
+            line_shop.pp_join_key(prop.get("mapped_stat"), prop["stat_type"]),
+            prop["line"],
+            ud_index,
+        )
+        edge = edge_index.get(
+            (line_shop.normalize(prop["name"]), prop.get("mapped_stat"), prop["line"])
+        )
+        engine = None
+        if edge:
+            engine = {
+                "verdict": edge.get("verdict"),
+                "play": edge.get("play"),
+                "win_prob": edge.get("win_prob"),
+                "ev_percent": edge.get("ev_percent"),
+                "edge_type": edge.get("edge_type"),
+                "book_count": edge.get("book_count"),
+                "dk_line": edge.get("dk_line"),
+                "flags": edge.get("flags"),
+            }
+        g["props"].append(
+            {
+                "player": prop["name"],
+                "team": prop.get("team"),
+                "line": prop["line"],
+                "position": prop.get("position"),
+                "image_url": prop.get("image_url"),
+                "opponent": prop.get("opponent"),
+                "game_id": prop.get("game_id"),
+                "start_time": prop.get("start_time"),
+                "underdog": ud,
+                "engine": engine,
+            }
+        )
+
+    groups = [
+        {"stat_type": stat, "count": len(g["props"]), **g}
+        for stat, g in grouped.items()
+    ]
+    # Stats we can actually analyze first, then by how many props.
+    groups.sort(key=lambda g: (g["has_form_data"], g["count"]), reverse=True)
+
+    # The matchups on the board, keeping only games that actually have props.
+    games_file = PROJECT_ROOT / "data" / "processed" / "pp_games.json"
+    games: list[dict] = []
+    if games_file.exists():
+        with games_file.open() as file:
+            all_games = json.load(file)
+        counts = Counter(p.get("game_id") for p in props)
+        games = [
+            {**game, "count": counts[game["game_id"]]}
+            for game in all_games
+            if counts.get(game["game_id"])
+        ]
+        games.sort(key=lambda g: g.get("start_time") or "")
+
+    return {"total": len(props), "groups": groups, "games": games}
 
 
 @app.get("/api/record")
 def get_record():
     return get_record_summary()
+
+
+class TrackBetRequest(AnalyzeRequest):
+    """An edge the user is logging as a placed bet, plus an optional stake."""
+
+    stake: float | None = None
+
+
+@app.post("/api/bets")
+def track_bet(req: TrackBetRequest):
+    from storage.db_manager import add_bet
+
+    payload = req.model_dump()
+    player = payload.get("player") or payload.get("dk_player_name")
+    if not player or payload.get("stat_type") is None or payload.get("pp_line") is None:
+        return {"ok": False, "error": "Missing player, stat, or line."}
+
+    bet = {
+        "pp_player_name": player,
+        "dk_player_name": payload.get("dk_player_name") or player,
+        "team": payload.get("team"),
+        "opponent": payload.get("opponent"),
+        "stat_type": payload["stat_type"],
+        "play": payload.get("play") or "OVER",
+        "pp_line": payload["pp_line"],
+        "dk_line": payload.get("dk_line"),
+        "win_prob": payload.get("win_prob"),
+        "ev_percent": payload.get("ev_percent"),
+        "verdict": payload.get("verdict"),
+        "edge_type": payload.get("edge_type"),
+        "book_count": payload.get("book_count"),
+        "commence_time": payload.get("commence_time"),
+        "stake": payload.get("stake"),
+    }
+    bet_id = add_bet(bet)
+    if bet_id is None:
+        return {"ok": True, "duplicate": True}
+    return {"ok": True, "id": bet_id}
+
+
+@app.get("/api/bets")
+def list_bets():
+    from storage.db_manager import get_bet_record_summary, get_bets
+
+    return {"bets": get_bets(), "summary": get_bet_record_summary()}
+
+
+@app.post("/api/bets/settle")
+def settle_my_bets():
+    from engine.settlement import settle_bets
+
+    settled, report = settle_bets()
+    return {"success": True, "settled": settled, "output": "\n".join(report)}
+
+
+@app.delete("/api/bets/{bet_id}")
+def remove_bet(bet_id: int):
+    from storage.db_manager import delete_bet
+
+    return {"ok": delete_bet(bet_id)}
 
 
 @app.get("/api/edges")
@@ -167,8 +454,11 @@ def get_edges(
     ev_count = int((frame["edge_type"] == "+EV Odds Juice").sum())
     yes_count = int((frame["verdict"] == "YES").sum())
 
+    edges = frame.to_dict(orient="records")
+    _attach_underdog(edges)
+
     return {
-        "edges": frame.to_dict(orient="records"),
+        "edges": edges,
         "summary": {
             "unique": len(frame),
             "line_discrepancy": line_count,
@@ -177,6 +467,30 @@ def get_edges(
             "stats": stats,
         },
     }
+
+
+def _attach_underdog(edges: list[dict]) -> None:
+    """Add Underdog's line + which app to bet the engine's side on, per edge.
+
+    Edges are engine-keyed, so the stat_type is itself the join key (a _1h key
+    only matches UD first-half props — never a full-match line)."""
+    from engine import line_shop
+
+    index = line_shop.build_index(line_shop.load_underdog())
+    for edge in edges:
+        player = edge.get("player") or edge.get("dk_player_name") or ""
+        pp_line = edge.get("pp_line")
+        if not player or pp_line is None:
+            edge["underdog"] = None
+            continue
+        edge["underdog"] = line_shop.match_edge(
+            edge.get("play", ""),
+            player,
+            line_shop.normalize(player),
+            edge.get("stat_type", ""),
+            pp_line,
+            index,
+        )
 
 
 @app.get("/api/edges/export")

@@ -37,6 +37,50 @@ To trade more soccer stats (goals, saves, passes), extend the `world_cup`
 entry in `engine/sports.py` — the PP parser prints any stat types it skipped
 so you can see exactly what's on the board.
 
+### Model-based pricing (stats no book posts)
+
+Books only price soccer **shots, shots on target, goals, and assists**.
+PrizePicks posts many more (saves, fouls, tackles, crosses, offsides), so for
+those there is no market line to compare against. Instead the engine builds its
+own projection from each player's **World Cup form**:
+
+- `scrapers/fbref_stats.py` pulls every WC player's tournament stats from FBref
+  via **soccerdata** (clears Cloudflare with undetected-chromedriver, caches
+  locally). Writes `data/processed/fbref_wc_stats.json`.
+- `engine/projections.py` maps a PP stat to its FBref field, projects the
+  expected count next match as `total / matches played`, and runs it through the
+  same push-adjusted Poisson the book path uses.
+- `engine/matcher.py:price_model_edges` logs these as `edge_type='Form Model'`.
+
+Caveats, by design:
+- These plays are **always flagged** ("no betting market"), so they **cap at
+  MAYBE** (LEAN). One-game samples add a second small-sample flag.
+- A player needs **≥1 WC match played** to be modeled — opening-match teams
+  produce no modeled plays until they kick off.
+- FBref's World Cup feed is the simplified Opta box score, so **passes,
+  dribbles, key passes, and clearances are NOT available** for the tournament
+  (they exist only in domestic-league data).
+- These stats have no ESPN settlement mapping yet, so modeled edges stay
+  ungraded until that's added.
+
+Run it from the **Update Data** page ("Update World Cup form") or
+`python3 scrapers/fbref_stats.py`. Re-run after each matchday.
+
+### Team form as AI context (not edges)
+
+The same scraper also writes **team profiles** (`data/processed/fbref_wc_teams.json`):
+each team's attack (shots, SoT, goals/game), defense (goals conceded, shots on
+target faced, clean sheets), and style (fouls, crosses, tackles, offsides).
+
+`engine/team_profiles.py` resolves a play's team + opponent (with a name-alias
+map for FBref vs book naming) and `engine/ai_analyst.py` injects this into the
+Claude prompt as **"Tournament form so far."** This matters because Claude's
+training can't see the live tournament — feeding real form turns "is he in
+form / is that defense leaky?" from a guess into a data-grounded read. The
+prompt flags that samples are small early on, and these numbers are **context
+only — never used to generate an edge**. Visible in the "What Claude sees"
+toggle.
+
 ---
 
 ## What This Project Does
@@ -100,13 +144,19 @@ Prizepicks/
 ├── scrapers/
 │   ├── draftkings_api.py         # Multi-book sharp lines + alternates (Odds-API)
 │   ├── prizepicks_api.py         # Parses pasted PP raw JSON into flat format
+│   ├── fbref_stats.py            # World Cup player + team form from FBref
+│   ├── fbref_club_stats.py       # Club-season form (pre-tournament AI context)
 │   ├── injuries_api.py           # ESPN injury report (free, cached 30 min)
 │   └── results_api.py            # ESPN box scores (free)
 ├── engine/
+│   ├── sports.py                 # Per-sport config (NBA / World Cup): markets, model, settlement
 │   ├── probability.py            # De-vig, ladder interpolation, EV, slips
+│   ├── projections.py            # Form-based pricing for stats no book posts
+│   ├── team_profiles.py          # Team attack/defense/style form -> AI context
 │   ├── matcher.py                # Verdict engine: prices PP lines, flags traps
 │   ├── settlement.py             # Grades edges vs box scores, record report
 │   ├── clv_report.py             # CLV report from logged edges
+│   ├── ai_analyst.py             # Claude second-opinion OVER/UNDER/PASS call
 │   └── name_matcher.py           # Fuzzy player name matching
 ├── storage/
 │   └── db_manager.py             # SQLite: props ladders, edges, settlement
@@ -118,8 +168,8 @@ Prizepicks/
 ## First-Time Setup
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env          # then add your ODDS_API_KEY
 python3 storage/db_manager.py init
@@ -301,19 +351,62 @@ anchored to DraftKings only (not the consensus) for consistency.
 
 ## AI Analyst (ships backlog #2)
 
-Each pick on the Opportunities page has an **Ask AI** button. It sends the play's
-full context — the sharp-consensus win probability, EV over break-even, the
-anchor line vs the PrizePicks line, book count, and every trap flag — to Claude,
-which returns an independent **OVER / UNDER / PASS** call with confidence,
-reasoning, and key factors. It's a second opinion that reads the warnings: a
-serious trap flag pushes it toward PASS even when the math looks good, and it
-shows whether it **agrees with or differs from** the engine's verdict.
+On the Opportunities page, the plays the engine likes (**YES / MAYBE**) are
+surfaced as cards and every row has an **Ask Claude** button — nothing calls the
+model until you click, so you choose which plays to spend a call on. Claude gets
+the play's full context — the sharp-consensus win probability, EV over
+break-even, the anchor line vs the PrizePicks line, book count, every trap flag,
+**and the matchup (the opponent, derived from the sharp board's game string)** —
+and returns an independent **OVER / UNDER / PASS** call with confidence,
+reasoning, and key factors. It's a second opinion that reads the warnings *and
+weighs the opponent*: it reasons about how strong the other side is and whether
+the player's team should control the game, a serious trap flag pushes it toward
+PASS even when the math looks good, and it shows whether it **agrees with or
+differs from** the engine's verdict.
+
+Every pick also has a **"What Claude sees"** toggle that shows the exact prompt
+(the play's facts) and the system instructions — no model call, full
+transparency into what's being asked and how.
+
+**Two analysis modes** (toggle next to the verdict chips):
+- **Full** — the read described above, anchored to the sharp-book consensus.
+- **PrizePicks-only** — drops all sportsbook data and judges the play from the
+  *stats alone*: the player's per-game rate (FBref) plus the team form, no
+  win%/EV. The "stats half" of the analysis — the right tool for the many PP
+  props with no book line. Uses a separate system prompt
+  (`STATS_ONLY_SYSTEM_PROMPT`) that leads from the player's rate, respects small
+  samples, and defaults to PASS when there's no real basis. Pass `mode` to
+  `/api/edges/analyze` and `/api/edges/prompt` (`"full"` | `"stats_only"`).
+
+The player rate comes from `engine/projections.py:player_form`, which prefers
+World Cup form and **falls back to club-season form** (`scrapers/fbref_club_stats.py`
+→ `data/processed/fbref_club_stats.json`, Big-5 leagues, ~42% of a WC squad) so a
+player has a number *before* their first tournament match. The prompt tags the
+source ("World Cup" vs "club season 2025-26").
+
+### PrizePicks Board (the full menu)
+
+`scrapers/prizepicks_api.py` also writes the **complete** parsed board
+(`data/processed/pp_board.json`) — every stat type, including ones no book prices
+and the engine can't grade (Passes, Dribbles, Shots Assisted, Fantasy Score,
+Clearances). `GET /api/prizepicks/board` groups these by stat type with a
+`has_form_data` flag, and the **PrizePicks Board** tab lists them all with a
+stats-only "Ask Claude" on each. Stats without a form feed are clearly marked
+"no stats yet" — Claude can only give a general read there.
+
+The board itself only lists **today's upcoming, unsettled plays**: settled
+results and games that have already kicked off drop off automatically (your
+lifetime record still counts them).
 
 - **Runs on your Claude subscription.** `engine/ai_analyst.py` shells out to the
   logged-in `claude` CLI by default (`AI_BACKEND=auto`/`cli`) — no metered API
   key. Set `AI_BACKEND=sdk` + `ANTHROPIC_API_KEY` to use the metered API instead.
-- **Endpoint:** `POST /api/edges/analyze` (takes an edge row, returns the verdict).
-- **Tests:** `pip install pytest && python3 -m pytest tests/` (AI analyst + Kelly).
+- **Endpoints:** `POST /api/edges/analyze` (takes an edge row, fills in the
+  opponent if missing, returns the verdict + the opponent + the exact prompt
+  `sent`). `POST /api/edges/prompt` returns just that `sent` payload with **no
+  model call** — used by the "What Claude sees" toggle.
+- **Tests:** `pip install -r requirements-dev.txt && python3 -m pytest tests/`
+  (AI analyst + matchup + Kelly).
 
 **Kelly stake sizing:** slip suggestions now also carry a fractional-Kelly stake
 (`kelly_pct`) — the matcher tells you not just *which* slip but *how much* of

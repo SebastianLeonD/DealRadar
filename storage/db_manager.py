@@ -6,6 +6,8 @@ from pathlib import Path
 DB_PATH = Path('data/arb_engine.db')
 DK_STAGING_FILE = Path('data/processed/draftkings_data.json')
 PP_STAGING_FILE = Path('data/processed/live.json')
+# Underdog's de-vigged board, same shape as DK — ingested as another book.
+UD_STAGING_FILE = Path('data/processed/underdog_sharp.json')
 
 TABLES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS props (
@@ -62,6 +64,29 @@ CREATE TABLE IF NOT EXISTS edges (
     pp_captured_at TEXT,
     dk_captured_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS bets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    pp_player_name TEXT NOT NULL,
+    dk_player_name TEXT NOT NULL,
+    team TEXT,
+    opponent TEXT,
+    stat_type TEXT NOT NULL,
+    play TEXT NOT NULL CHECK(play IN ('OVER', 'UNDER')),
+    pp_line REAL NOT NULL,
+    dk_line REAL,
+    win_prob REAL,
+    ev_percent REAL,
+    verdict TEXT,
+    edge_type TEXT,
+    book_count INTEGER,
+    commence_time TEXT,
+    stake REAL,
+    result TEXT,
+    actual_value REAL,
+    settled_at TEXT
+);
 """
 
 INDEX_SCHEMA = """
@@ -79,6 +104,9 @@ CREATE INDEX IF NOT EXISTS idx_edges_dk_player
 
 CREATE INDEX IF NOT EXISTS idx_edges_unsettled
     ON edges(result, flagged_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_bets_created
+    ON bets(created_at DESC);
 """
 
 PROPS_MIGRATION_COLUMNS = {
@@ -370,12 +398,16 @@ def ingest_staging(
     db_path: Path = DB_PATH,
     dk_path: Path = DK_STAGING_FILE,
     pp_path: Path = PP_STAGING_FILE,
+    ud_path: Path = UD_STAGING_FILE,
 ) -> dict[str, int]:
     init_db(db_path)
     results = {}
 
     if dk_path.exists():
         results['dk'] = ingest_draftkings(dk_path, db_path)
+    if ud_path.exists():
+        # Same loader/shape as DK; records carry Bookmaker='underdog'.
+        results['underdog'] = ingest_draftkings(ud_path, db_path)
     if pp_path.exists():
         results['pp'] = ingest_prizepicks(pp_path, db_path)
 
@@ -661,6 +693,177 @@ def get_record_summary(db_path: Path = DB_PATH) -> dict:
         summary['avg_predicted_prob'] = round(sum(predicted) / len(predicted) * 100, 1)
 
     return summary
+
+
+def add_bet(bet: dict, db_path: Path = DB_PATH) -> int | None:
+    """Log a bet the user actually placed. Returns the new id, or None if an
+    identical open bet already exists (so double-clicks don't duplicate)."""
+    init_db(db_path)
+    with get_connection(db_path) as connection:
+        existing = connection.execute(
+            """
+            SELECT id FROM bets
+            WHERE pp_player_name = ? AND stat_type = ? AND play = ?
+              AND pp_line = ? AND result IS NULL
+            LIMIT 1
+            """,
+            (bet['pp_player_name'], bet['stat_type'], bet['play'], bet['pp_line']),
+        ).fetchone()
+        if existing:
+            return None
+        cursor = connection.execute(
+            """
+            INSERT INTO bets (
+                created_at, pp_player_name, dk_player_name, team, opponent,
+                stat_type, play, pp_line, dk_line, win_prob, ev_percent,
+                verdict, edge_type, book_count, commence_time, stake
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                bet.get('created_at') or utc_now(),
+                bet['pp_player_name'],
+                bet['dk_player_name'],
+                bet.get('team'),
+                bet.get('opponent'),
+                bet['stat_type'],
+                bet['play'],
+                bet['pp_line'],
+                bet.get('dk_line'),
+                bet.get('win_prob'),
+                bet.get('ev_percent'),
+                bet.get('verdict'),
+                bet.get('edge_type'),
+                bet.get('book_count'),
+                bet.get('commence_time'),
+                bet.get('stake'),
+            ),
+        )
+        connection.commit()
+        return cursor.lastrowid
+
+
+def get_bets(db_path: Path = DB_PATH) -> list[dict]:
+    init_db(db_path)
+    with get_connection(db_path) as connection:
+        rows = connection.execute(
+            "SELECT * FROM bets ORDER BY created_at DESC, id DESC"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_unsettled_bets(db_path: Path = DB_PATH) -> list[dict]:
+    init_db(db_path)
+    with get_connection(db_path) as connection:
+        rows = connection.execute(
+            "SELECT * FROM bets WHERE result IS NULL ORDER BY created_at ASC, id ASC"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def settle_bet(bet_id: int, result: str, actual_value: float, db_path: Path = DB_PATH) -> None:
+    with get_connection(db_path) as connection:
+        connection.execute(
+            "UPDATE bets SET result = ?, actual_value = ?, settled_at = ? WHERE id = ?",
+            (result, actual_value, utc_now(), bet_id),
+        )
+        connection.commit()
+
+
+def delete_bet(bet_id: int, db_path: Path = DB_PATH) -> bool:
+    init_db(db_path)
+    with get_connection(db_path) as connection:
+        cursor = connection.execute("DELETE FROM bets WHERE id = ?", (bet_id,))
+        connection.commit()
+        return cursor.rowcount > 0
+
+
+def get_bet_record_summary(db_path: Path = DB_PATH) -> dict:
+    """Record of the bets the user actually placed — overall and by verdict."""
+    init_db(db_path)
+    with get_connection(db_path) as connection:
+        rows = connection.execute("SELECT verdict, result, win_prob, stake FROM bets").fetchall()
+
+    summary = {
+        'total': len(rows),
+        'settled': 0,
+        'wins': 0,
+        'losses': 0,
+        'pushes': 0,
+        'hit_rate': None,
+        'total_staked': 0.0,
+        'by_verdict': {},
+    }
+    for row in rows:
+        summary['total_staked'] += row['stake'] or 0.0
+        result = row['result']
+        if result is None:
+            continue
+        summary['settled'] += 1
+        verdict = row['verdict'] or 'UNRATED'
+        bucket = summary['by_verdict'].setdefault(
+            verdict, {'wins': 0, 'losses': 0, 'pushes': 0}
+        )
+        if result == 'WIN':
+            summary['wins'] += 1
+            bucket['wins'] += 1
+        elif result == 'LOSS':
+            summary['losses'] += 1
+            bucket['losses'] += 1
+        else:
+            summary['pushes'] += 1
+            bucket['pushes'] += 1
+
+    decided = summary['wins'] + summary['losses']
+    if decided:
+        summary['hit_rate'] = round(summary['wins'] / decided * 100, 1)
+    summary['total_staked'] = round(summary['total_staked'], 2)
+    return summary
+
+
+def get_player_game_map(db_path: Path = DB_PATH) -> dict[str, str]:
+    """player_name -> bookmaker 'Game' string (e.g. 'Japan @ Netherlands').
+
+    Pulled from the sharp (DK) props, newest scrape wins. Used to tell the AI
+    analyst who each player is up against so it can reason about the matchup.
+    """
+    init_db(db_path)
+
+    with get_connection(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT player_name, game
+            FROM props
+            WHERE source = 'DK' AND game IS NOT NULL AND game != ''
+            ORDER BY captured_at ASC
+            """
+        ).fetchall()
+
+    # Later (newer) rows overwrite earlier ones for the same player.
+    return {row['player_name']: row['game'] for row in rows}
+
+
+def get_game_commence_map(db_path: Path = DB_PATH) -> list[dict]:
+    """Distinct (game, commence_time) pairs from the sharp (DK) props.
+
+    Modeled edges (saves, fouls, etc.) have no book line, so they can't inherit
+    a kickoff from a matched book prop. Instead we resolve it from the player's
+    team: find the DK game whose 'Away @ Home' string names that team.
+    """
+    init_db(db_path)
+
+    with get_connection(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT game, commence_time, MAX(captured_at) AS captured_at
+            FROM props
+            WHERE source = 'DK' AND game IS NOT NULL AND game != ''
+              AND commence_time IS NOT NULL
+            GROUP BY game
+            ORDER BY captured_at ASC
+            """
+        ).fetchall()
+
+    return [{'game': row['game'], 'commence_time': row['commence_time']} for row in rows]
 
 
 def get_latest_dk_line(

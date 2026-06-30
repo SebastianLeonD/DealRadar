@@ -9,6 +9,7 @@ from engine.ai_analyst import (
     build_context,
     extract_recommendation,
     format_prompt,
+    opponent_from_game,
 )
 
 
@@ -49,6 +50,26 @@ def test_format_prompt_includes_flags_and_numbers():
     assert "Kylian Mbappe" in prompt
     assert "Injury report: questionable" in prompt
     assert "OVER, UNDER, or PASS" in prompt
+
+
+def test_opponent_from_game_picks_other_side():
+    assert opponent_from_game("New Zealand @ Iran", "New Zealand") == "Iran"
+    assert opponent_from_game("Egypt @ Belgium", "Belgium") == "Egypt"
+
+
+def test_opponent_from_game_handles_bad_input():
+    assert opponent_from_game("", "Belgium") == ""
+    assert opponent_from_game(None, "Belgium") == ""
+    assert opponent_from_game("Egypt @ Belgium", None) == ""
+    assert opponent_from_game(float("nan"), float("nan")) == ""  # NaN rows from pandas
+
+
+def test_build_context_resolves_opponent_and_matchup():
+    ctx = build_context({**_edge(), "game": "Tunisia @ France"})
+    assert ctx["opponent"] == "Tunisia"
+    assert ctx["matchup"] == "Tunisia @ France"
+    prompt = format_prompt(ctx)
+    assert "Tunisia" in prompt and "Matchup" in prompt
 
 
 def test_extract_plain_and_fenced():
@@ -114,9 +135,73 @@ def test_analyze_via_cli_raises_on_failure():
     def fake_runner(cmd, **kwargs):
         return types.SimpleNamespace(returncode=1, stdout="", stderr="not logged in")
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="not logged in"):
+        analyze_play(_edge(), backend="cli", runner=fake_runner)
+
+
+def test_extract_tolerates_unescaped_control_chars():
+    # Models sometimes leave a literal newline inside the reasoning string.
+    rec = extract_recommendation(
+        '{"pick":"OVER","confidence":70,"reasoning":"line one\nline two","key_factors":["a"]}'
+    )
+    assert rec["pick"] == "OVER" and "line two" in rec["reasoning"]
+
+
+def test_cli_failure_surfaces_envelope_message():
+    # A usage limit comes back as returncode 1 with the reason in result, not stderr.
+    def fake_runner(cmd, **kwargs):
+        envelope = {"type": "result", "result": "You've hit your Opus limit · resets Jun 18"}
+        return types.SimpleNamespace(returncode=1, stdout=json.dumps(envelope), stderr="")
+
+    with pytest.raises(RuntimeError, match="Opus limit"):
         analyze_play(_edge(), backend="cli", runner=fake_runner)
 
 
 def test_cli_available_returns_bool():
     assert isinstance(ai_analyst.cli_available(), bool)
+
+
+# --- per-book picks when PrizePicks and Underdog differ ---
+
+def test_two_book_prompt_asks_for_each_line():
+    edge = {**_edge(), "pp_line": 3.0, "ud_line": 2.5}
+    sent = ai_analyst.describe_request(edge)
+    assert "Underdog line: 2.5" in sent["prompt"]
+    assert "underdog_pick" in sent["response_format"]
+
+
+def test_same_line_does_not_ask_for_a_second_pick():
+    edge = {**_edge(), "pp_line": 2.5, "ud_line": 2.5}
+    sent = ai_analyst.describe_request(edge)
+    assert "underdog_pick" not in sent["response_format"]
+
+
+def test_extract_parses_underdog_pick():
+    rec = extract_recommendation(
+        '{"pick":"UNDER","underdog_pick":"OVER","confidence":65,'
+        '"agrees_with_engine":false,"reasoning":"r","key_factors":["a"]}'
+    )
+    assert rec["pick"] == "UNDER" and rec["underdog_pick"] == "OVER"
+
+
+def test_extract_omits_underdog_pick_when_absent():
+    rec = extract_recommendation('{"pick":"OVER","confidence":60,"reasoning":"r"}')
+    assert rec["underdog_pick"] is None
+
+
+def test_cli_model_splits_by_mode():
+    # Picks (full) get opus; the high-volume board (stats_only) gets haiku.
+    def capture(store):
+        def run(cmd, **kwargs):
+            store["model"] = cmd[cmd.index("--model") + 1]
+            envelope = {"result": json.dumps(
+                {"pick": "PASS", "confidence": 50, "reasoning": "r", "key_factors": []}
+            )}
+            return types.SimpleNamespace(returncode=0, stdout=json.dumps(envelope), stderr="")
+        return run
+
+    full, stats = {}, {}
+    analyze_play(_edge(), backend="cli", mode="full", runner=capture(full))
+    analyze_play(_edge(), backend="cli", mode="stats_only", runner=capture(stats))
+    assert full["model"] == "opus"
+    assert stats["model"] == "haiku"

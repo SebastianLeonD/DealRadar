@@ -3,7 +3,14 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type FeedsResponse, type PipelineResult } from "../lib/api";
 import { PageHeader } from "../components/ui";
 
-type ActionKey = "fetch_sharp" | "parse_pp" | "run_matcher" | "run_full" | "settle_results";
+type ActionKey =
+  | "fetch_sharp"
+  | "parse_pp"
+  | "fetch_form"
+  | "fetch_underdog"
+  | "run_matcher"
+  | "run_full"
+  | "settle_results";
 
 const STEPS: {
   key: ActionKey;
@@ -21,9 +28,19 @@ const STEPS: {
     body: "Reads the PrizePicks data you saved into data/raw/prizepicks_raw.json. Paste a fresh copy close to game time.",
   },
   {
+    key: "fetch_form",
+    title: "Update World Cup form (optional)",
+    body: "Pulls each World Cup player's tournament stats from FBref to price stats no book posts (saves, fouls, tackles, crosses). Free; slow on first run. Re-run after each matchday.",
+  },
+  {
+    key: "fetch_underdog",
+    title: "Update Underdog lines (optional)",
+    body: "Pulls Underdog Fantasy's board directly (free, no paste) and shows its line next to each PrizePicks prop on the PrizePicks Board tab — so you can take the softer side. Re-run close to kickoff.",
+  },
+  {
     key: "run_matcher",
     title: "Find the picks",
-    body: "Compares both sides, calculates win chances, and posts verdicts to Today's Picks. Free.",
+    body: "Compares both sides, calculates win chances, and posts verdicts to The Board. Free.",
   },
   {
     key: "settle_results",
@@ -72,6 +89,12 @@ export function ExecutionPage() {
         case "parse_pp":
           result = await api.parsePp();
           break;
+        case "fetch_form":
+          result = await api.fetchForm();
+          break;
+        case "fetch_underdog":
+          result = await api.fetchUnderdog();
+          break;
         case "run_matcher":
           result = await api.runMatcher();
           break;
@@ -96,7 +119,7 @@ export function ExecutionPage() {
     <div>
       <PageHeader
         title="Update Data"
-        subtitle="Run these steps in order before games start. Or press the big button to do steps 1–3 at once."
+        subtitle="Run these before games start. 'Run everything' gets lines, reads your board, and finds picks. Updating World Cup form (for saves/fouls/tackles) is optional and run on its own."
         action={
           <button
             type="button"

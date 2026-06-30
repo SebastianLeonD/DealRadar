@@ -5,6 +5,9 @@ import sys
 from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+EASTERN = ZoneInfo("America/New_York")  # show all times in NY Eastern
 
 import pandas as pd
 
@@ -12,11 +15,16 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from engine.ai_analyst import opponent_from_game
 from engine.clv_report import build_clv_rows
 from engine.matcher import find_edges
-from storage.db_manager import get_connection, init_db, ingest_staging
+from storage.db_manager import get_connection, get_player_game_map, init_db, ingest_staging
 
 FRESHNESS_MINUTES = 5
+
+# A soccer match runs ~2h with halftime and stoppage; once this much time has
+# passed since kickoff the game is treated as over and drops off the board.
+MATCH_OVER_HOURS = 2.5
 
 EDGE_DEDUPE_KEYS = ["player", "play", "pp_line", "dk_line", "edge_type", "stat_type"]
 CLV_DEDUPE_KEYS = ["pp_player_name", "play", "pp_line", "dk_line_at_flag", "edge_type", "stat_type"]
@@ -44,6 +52,31 @@ ACTION_CATALOG = {
         ),
         "api_calls": "None (local file parse only)",
         "writes_to": "data/processed/live.json",
+    },
+    "fetch_form": {
+        "title": "Update World Cup Form",
+        "command": "python3 scrapers/fbref_stats.py",
+        "description": (
+            "Scrapes World Cup player AND team stats from FBref (via soccerdata, "
+            "which clears Cloudflare). Player stats price book-less PrizePicks "
+            "stats (saves, fouls, tackles, crosses, offsides — capped at MAYBE). "
+            "Team profiles (attack/defense/style) feed the AI analyst as live "
+            "matchup context. Cached locally; only new matches trigger a fetch."
+        ),
+        "api_calls": "None billed — FBref is free (web scrape)",
+        "writes_to": "data/processed/fbref_wc_stats.json, fbref_wc_teams.json",
+    },
+    "fetch_underdog": {
+        "title": "Update Underdog Lines",
+        "command": "python3 scrapers/underdog_api.py",
+        "description": (
+            "Fetches Underdog Fantasy's open pick'em board directly (no key, no "
+            "paste — unlike PrizePicks), filters to FIFA player props, and maps "
+            "each to the engine's stat keys. The PrizePicks Board tab then shows "
+            "Underdog's line beside each PP prop so you can shop the softer side."
+        ),
+        "api_calls": "None billed — Underdog's lines endpoint is public JSON",
+        "writes_to": "data/processed/underdog_data.json",
     },
     "run_matcher": {
         "title": "Run Edge Detection",
@@ -155,13 +188,17 @@ def format_status_label(source: str) -> tuple[str, str]:
         return "stale", "No data ingested yet"
 
     status = "fresh" if is_fresh(last_capture) else "aging"
-    timestamp = last_capture.strftime("%Y-%m-%d %H:%M UTC")
+    when = last_capture
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    timestamp = when.astimezone(EASTERN).strftime("%Y-%m-%d %H:%M ET")
     return status, f"Last {source} sync: {timestamp}"
 
 
 def load_edges_dataframe(
     stat_type: str = "All",
     edge_type: str = "All",
+    active_only: bool = True,
 ) -> pd.DataFrame:
     init_db()
     query = """
@@ -184,6 +221,7 @@ def load_edges_dataframe(
             verdict,
             flags,
             book_count,
+            commence_time,
             result,
             actual_value
         FROM edges
@@ -205,12 +243,38 @@ def load_edges_dataframe(
         frame = pd.read_sql_query(query, connection, params=params)
 
     frame = dedupe_edges(frame, EDGE_DEDUPE_KEYS)
-    if not frame.empty:
-        frame = frame.sort_values(
-            ["win_prob", "flagged_at"], ascending=[False, False], na_position="last"
-        ).reset_index(drop=True)
-        # NaN is invalid JSON; old rows predate the verdict columns.
-        frame = frame.astype(object).where(pd.notna(frame), None)
+    if frame.empty:
+        return frame
+
+    if active_only:
+        # "Upcoming picks" = unsettled plays whose game hasn't finished yet.
+        # Settled results, games that ended hours ago, and rows with no start
+        # time all drop off. Future days stay so every stat type can surface.
+        local_tz = datetime.now().astimezone().tzinfo
+        kickoff = pd.to_datetime(
+            frame["commence_time"], utc=True, errors="coerce"
+        ).dt.tz_convert(local_tz)
+        now = pd.Timestamp.now(tz=local_tz)
+        ended_before = now - pd.Timedelta(hours=MATCH_OVER_HOURS)
+        frame = frame[
+            frame["result"].isna()
+            & kickoff.notna()
+            & (kickoff >= ended_before)
+        ]
+        if frame.empty:
+            return frame.reset_index(drop=True)
+
+    frame = frame.sort_values(
+        ["win_prob", "flagged_at"], ascending=[False, False], na_position="last"
+    ).reset_index(drop=True)
+    # Attach the matchup so the UI can show it and the AI can reason on it.
+    game_map = get_player_game_map()
+    frame["game"] = frame["dk_player_name"].map(game_map).fillna("")
+    frame["opponent"] = frame.apply(
+        lambda row: opponent_from_game(row["game"], row["team"]), axis=1
+    )
+    # NaN is invalid JSON; old rows predate the verdict columns.
+    frame = frame.astype(object).where(pd.notna(frame), None)
     return frame
 
 

@@ -23,9 +23,25 @@ import subprocess
 
 AI_BACKEND = os.getenv("AI_BACKEND", "auto")
 AI_CLI_BINARY = os.getenv("AI_CLI_BINARY", "claude")
-AI_CLI_MODEL = os.getenv("AI_CLI_MODEL", "opus")
+# Model by analysis mode: opus for real picks (full), haiku for the cheap,
+# high-volume PrizePicks-board reads (stats_only). All overridable via .env.
+AI_CLI_MODEL = os.getenv("AI_CLI_MODEL", "opus")              # full / default
+AI_CLI_MODEL_STATS = os.getenv("AI_CLI_MODEL_STATS", "haiku")  # stats_only
 AI_SDK_MODEL = os.getenv("AI_MODEL", "claude-opus-4-8")
+AI_SDK_MODEL_STATS = os.getenv("AI_MODEL_STATS", "claude-haiku-4-5-20251001")
 AI_MAX_TOKENS = int(os.getenv("AI_MAX_TOKENS", "16000"))
+
+
+def _cli_model_for(mode: str) -> str:
+    if mode == "stats_only":
+        return os.getenv("AI_CLI_MODEL_STATS", AI_CLI_MODEL_STATS)
+    return os.getenv("AI_CLI_MODEL", AI_CLI_MODEL)
+
+
+def _sdk_model_for(mode: str) -> str:
+    if mode == "stats_only":
+        return os.getenv("AI_MODEL_STATS", AI_SDK_MODEL_STATS)
+    return os.getenv("AI_MODEL", AI_SDK_MODEL)
 
 SYSTEM_PROMPT = (
     "You are a sharp sports-betting analyst reviewing a single PrizePicks player "
@@ -38,6 +54,19 @@ SYSTEM_PROMPT = (
     "is the strongest signal.\n"
     "- EV is measured against the 54.25% PrizePicks flex break-even. A play only "
     "makes sense if the win probability clears that and EV is positive.\n"
+    "- WEIGH THE MATCHUP, led by the tournament-form numbers when they are given. "
+    "The context may include this World Cup's form: the player's team attack and "
+    "style, and the opponent's defense (goals conceded, shots on target faced). "
+    "PREFER these actual numbers over general reputation — they reflect how the "
+    "teams have really played. But they are small samples (often one or two "
+    "matches), so do not over-read them; treat one game as weak evidence and fall "
+    "back on what you know about the teams. Ask: does this player's side create "
+    "enough chances, and is the opponent's defense leaky or stingy, to support the "
+    "line? For a goalkeeper, a leaky team in front of a busy keeper means more "
+    "saves. A favourable line against a defense that has been conceding chances is "
+    "more trustworthy; a tempting line against a defense keeping clean sheets "
+    "deserves scepticism. Name the specific opponent and cite the form when it "
+    "drives the call.\n"
     "- TAKE THE TRAP FLAGS SERIOUSLY. They catch the classic PrizePicks failure "
     "mode: a 'great' line gap that is really the sharp books pricing in news PP "
     "hasn't reacted to (injuries, stale board, books disagreeing). If a serious "
@@ -48,6 +77,28 @@ SYSTEM_PROMPT = (
     "information that is not in the context."
 )
 
+STATS_ONLY_SYSTEM_PROMPT = (
+    "You are a soccer analyst giving a form- and matchup-based read on a single "
+    "PrizePicks player prop. IMPORTANT: there is NO sportsbook line for this "
+    "prop — you have no market to lean on. Reason ONLY from the data provided "
+    "(the player's tournament form, the team form) plus your tactical knowledge "
+    "of the players and teams.\n\n"
+    "How to reason:\n"
+    "- START FROM THE PLAYER. If a per-game rate is given, that is your anchor: "
+    "compare it directly to the PrizePicks line. Is this player a high-volume "
+    "source of this stat or a peripheral one?\n"
+    "- WEIGH THE MATCHUP using the team form. Does the player's side create "
+    "enough volume, and is the opponent leaky or stingy in this area? For a "
+    "goalkeeper, more saves come from a busy keeper on a team under pressure.\n"
+    "- RESPECT SMALL SAMPLES. World Cup form is often one or two matches. Treat "
+    "it as weak evidence and lean on what you know about the player; say so.\n"
+    "- BE HONEST ABOUT UNCERTAINTY. With no market and little data, the right "
+    "answer is often PASS. Do NOT invent stats you were not given. If you have "
+    "no real basis, return PASS with low confidence.\n"
+    "- This is the stats half of the analysis only — there is no market check, so "
+    "do not pretend one exists."
+)
+
 _JSON_INSTRUCTION = (
     "Respond with ONLY a JSON object (no markdown, no code fences, no prose) of "
     "exactly this shape:\n"
@@ -55,6 +106,24 @@ _JSON_INSTRUCTION = (
     '"agrees_with_engine": <true|false>, "reasoning": "<2-4 sentences>", '
     '"key_factors": ["<short phrase>", ...]}'
 )
+
+
+def _json_instruction(ctx: dict | None = None) -> str:
+    """The required response shape — adds a second pick when the prop is offered
+    on PrizePicks and Underdog at different lines (the call can differ)."""
+    pp = ctx.get("prizepicks_line") if ctx else None
+    ud = ctx.get("underdog_line") if ctx else None
+    if ud is not None and pp is not None and ud != pp:
+        return (
+            "Respond with ONLY a JSON object (no markdown, no code fences, no prose) of "
+            "exactly this shape:\n"
+            '{"pick": "OVER"|"UNDER"|"PASS", "underdog_pick": "OVER"|"UNDER"|"PASS", '
+            '"confidence": <int 0-100>, "agrees_with_engine": <true|false>, '
+            '"reasoning": "<2-4 sentences>", "key_factors": ["<short phrase>", ...]}\n'
+            f"`pick` is your call for the PrizePicks line ({pp}); `underdog_pick` is your "
+            f"call for the Underdog line ({ud})."
+        )
+    return _JSON_INSTRUCTION
 
 
 # ---------------------------------------------------------------------------
@@ -73,8 +142,29 @@ def _stat_label(stat: str | None) -> str:
     return stat.replace("player_", "").replace("_", " ")
 
 
-def build_context(edge: dict) -> dict:
-    """Normalise a frontend/DB edge row into the analyst's context. Pure."""
+def opponent_from_game(game: str | None, team: str | None) -> str:
+    """Pick the opponent out of a 'Away @ Home' game string given the player's
+    team. Tolerant of loose name matches; returns '' when it can't tell."""
+    if not isinstance(game, str) or "@" not in game:
+        return ""
+    away, _, home = game.partition("@")
+    away, home = away.strip(), home.strip()
+    if not isinstance(team, str) or not team.strip():
+        return ""
+    t = team.strip().lower()
+    if t and (t in home.lower() or home.lower() in t):
+        return away
+    if t and (t in away.lower() or away.lower() in t):
+        return home
+    return ""
+
+
+def build_context(edge: dict, mode: str = "full") -> dict:
+    """Normalise a frontend/DB edge row into the analyst's context.
+
+    mode='full' includes the sharp-book consensus. mode='stats_only' drops it and
+    adds the player's own form rate — a PrizePicks-only, stats-driven read.
+    """
     pp_line = _num(edge.get("pp_line"))
     dk_line = _num(edge.get("dk_line") if edge.get("dk_line") is not None
                    else edge.get("dk_line_at_flag"))
@@ -89,11 +179,28 @@ def build_context(edge: dict) -> dict:
     else:
         flag_list = []
 
+    team = edge.get("team") or ""
+    game = edge.get("game") or ""
+    opponent = edge.get("opponent") or opponent_from_game(game, team)
+
+    from engine.team_profiles import team_form
+    form = team_form(team, opponent)
+
+    player = edge.get("player") or edge.get("pp_player_name")
+    player_rate = None
+    if mode == "stats_only":
+        from engine.projections import player_form
+        player_rate = player_form(player, edge.get("stat_type"))
+
     return {
+        "mode": mode,
         "player": edge.get("player") or edge.get("pp_player_name"),
-        "team": edge.get("team") or "",
+        "team": team,
+        "opponent": opponent,
+        "matchup": game,
         "stat_type": _stat_label(edge.get("stat_type")),
         "prizepicks_line": pp_line,
+        "underdog_line": _num(edge.get("ud_line")),
         "engine_favoured_side": edge.get("play"),
         "engine_verdict": edge.get("verdict"),
         "win_probability": win_prob,
@@ -103,25 +210,73 @@ def build_context(edge: dict) -> dict:
         "edge_type": edge.get("edge_type"),
         "book_count": edge.get("book_count"),
         "trap_flags": flag_list,
+        "team_form": form,
+        "player_form": player_rate,
     }
 
 
 def format_prompt(ctx: dict) -> str:
+    opponent = ctx.get("opponent")
+    matchup = ctx.get("matchup")
+    if opponent:
+        matchup_line = f"Matchup: {ctx.get('team') or 'player'} vs {opponent}"
+    elif matchup:
+        matchup_line = f"Matchup: {matchup}"
+    else:
+        matchup_line = "Matchup: opponent unknown — reason from the numbers only"
+
+    stats_only = ctx.get("mode") == "stats_only"
+    pp_line = ctx.get("prizepicks_line")
+    ud_line = ctx.get("underdog_line")
+    two_books = ud_line is not None and pp_line is not None and ud_line != pp_line
+
     lines = [
         f"Player: {ctx.get('player')} ({ctx.get('team') or 'team n/a'})",
+        matchup_line,
         f"Market: {ctx.get('stat_type')}",
-        f"PrizePicks line: {ctx.get('prizepicks_line')}",
-        f"Engine's favoured side: {ctx.get('engine_favoured_side')}  "
-        f"(verdict: {ctx.get('engine_verdict')})",
-        "",
-        "Sharp multi-book consensus:",
-        f"  true win probability of the favoured side: {_pct(ctx.get('win_probability'))}",
-        f"  EV over the 54.25% break-even: {_signed(ctx.get('ev_percent'))}",
-        f"  books' anchor line: {ctx.get('sharp_anchor_line')}  "
-        f"(gap vs PP line: {ctx.get('line_gap')})",
-        f"  edge type: {ctx.get('edge_type')}",
-        f"  books contributing: {ctx.get('book_count')}",
+        f"PrizePicks line: {pp_line}",
     ]
+    if two_books:
+        lines.append(f"Underdog line: {ud_line}  (different from PrizePicks — call each one)")
+
+    if stats_only:
+        pf = ctx.get("player_form")
+        lines.append("")
+        if pf:
+            lines.append(
+                f"Player form ({pf.get('source', 'World Cup')}): {pf['per_game']} "
+                f"{pf['stat']} per game over {pf['games']} match(es) ({pf['minutes']} min)."
+            )
+        else:
+            lines.append("Player form: no tournament data yet for this stat — "
+                         "reason from what you know about the player, and be cautious.")
+    else:
+        lines += [
+            f"Engine's favoured side: {ctx.get('engine_favoured_side')}  "
+            f"(verdict: {ctx.get('engine_verdict')})",
+            "",
+            "Sharp multi-book consensus:",
+            f"  true win probability of the favoured side: {_pct(ctx.get('win_probability'))}",
+            f"  EV over the 54.25% break-even: {_signed(ctx.get('ev_percent'))}",
+            f"  books' anchor line: {ctx.get('sharp_anchor_line')}  "
+            f"(gap vs PP line: {ctx.get('line_gap')})",
+            f"  edge type: {ctx.get('edge_type')}",
+            f"  books contributing: {ctx.get('book_count')}",
+        ]
+    form = ctx.get("team_form") or {}
+    if form:
+        lines.append("")
+        lines.append("Tournament form so far (this World Cup — small samples, "
+                     "weigh accordingly):")
+        if form.get("team_attack"):
+            lines.append(f"  {ctx.get('team')} attack ({form.get('team_games')}g): "
+                         f"{form['team_attack']}")
+        if form.get("team_style"):
+            lines.append(f"  {ctx.get('team')} style: {form['team_style']}")
+        if form.get("opponent_defense"):
+            lines.append(f"  {ctx.get('opponent')} defense "
+                         f"({form.get('opponent_games')}g): {form['opponent_defense']}")
+
     flags = ctx.get("trap_flags") or []
     lines.append("")
     if flags:
@@ -130,11 +285,41 @@ def format_prompt(ctx: dict) -> str:
     else:
         lines.append("Trap flags: none.")
     lines.append("")
-    lines.append(
-        "Decide OVER, UNDER, or PASS for this PrizePicks line. Set "
-        "agrees_with_engine to whether your pick matches the engine's favoured side."
+    two_book_note = (
+        " Because the two lines differ, give a separate call for each: the player "
+        "can clear the lower line but not the higher."
+        if two_books else ""
     )
+    if stats_only:
+        lines.append(
+            "Decide OVER, UNDER, or PASS from the form and matchup alone. There is no "
+            "engine pick to compare to, so set agrees_with_engine to false." + two_book_note
+        )
+    else:
+        lines.append(
+            "Decide OVER, UNDER, or PASS. Set agrees_with_engine to whether your "
+            "PrizePicks call matches the engine's favoured side." + two_book_note
+        )
     return "\n".join(lines)
+
+
+def _system_for(mode: str) -> str:
+    return STATS_ONLY_SYSTEM_PROMPT if mode == "stats_only" else SYSTEM_PROMPT
+
+
+def describe_request(edge: dict, mode: str = "full") -> dict:
+    """Exactly what gets handed to Claude, for UI transparency. No model call.
+
+    Returns the structured context the engine extracted, the rendered user
+    prompt, the system instructions, and the required response shape.
+    """
+    ctx = build_context(edge, mode=mode)
+    return {
+        "context": ctx,
+        "prompt": format_prompt(ctx),
+        "system": _system_for(mode),
+        "response_format": _json_instruction(ctx),
+    }
 
 
 def _pct(value):
@@ -164,8 +349,12 @@ def extract_recommendation(text: str) -> dict:
         confidence = int(payload.get("confidence", 50))
     except (TypeError, ValueError):
         confidence = 50
+    underdog_pick = str(payload.get("underdog_pick", "")).upper()
+    if underdog_pick not in ("OVER", "UNDER", "PASS"):
+        underdog_pick = None
     return {
         "pick": pick,
+        "underdog_pick": underdog_pick,
         "confidence": max(0, min(100, confidence)),
         "agrees_with_engine": bool(payload.get("agrees_with_engine", False)),
         "reasoning": str(payload.get("reasoning", "")).strip(),
@@ -176,9 +365,9 @@ def extract_recommendation(text: str) -> dict:
 # ---------------------------------------------------------------------------
 # Backends
 # ---------------------------------------------------------------------------
-def analyze_play(edge: dict, backend: str | None = None, runner=None) -> dict:
+def analyze_play(edge: dict, backend: str | None = None, runner=None, mode: str = "full") -> dict:
     """Evaluate one edge with Claude. Returns the recommendation dict."""
-    ctx = build_context(edge)
+    ctx = build_context(edge, mode=mode)
     backend = (backend or os.getenv("AI_BACKEND") or AI_BACKEND).lower()
     if backend == "auto":
         backend = "cli" if cli_available() else "sdk"
@@ -194,26 +383,31 @@ def cli_available() -> bool:
 def _analyze_via_cli(ctx: dict, runner=None) -> dict:
     runner = runner or subprocess.run
     binary = os.getenv("AI_CLI_BINARY", AI_CLI_BINARY)
-    model = os.getenv("AI_CLI_MODEL", AI_CLI_MODEL)
-    prompt = f"{format_prompt(ctx)}\n\n{_JSON_INSTRUCTION}"
+    model = _cli_model_for(ctx.get("mode", "full"))
+    prompt = f"{format_prompt(ctx)}\n\n{_json_instruction(ctx)}"
     cmd = [
         binary, "-p", prompt,
         "--output-format", "json",
         "--model", model,
-        "--append-system-prompt", SYSTEM_PROMPT,
+        "--append-system-prompt", _system_for(ctx.get("mode", "full")),
     ]
     result = runner(cmd, capture_output=True, text=True, timeout=240)
-    if getattr(result, "returncode", 0) != 0:
-        raise RuntimeError(
-            f"`{binary}` CLI failed (exit {result.returncode}). "
-            f"{(result.stderr or '').strip()[:300]}"
-        )
     stdout = (result.stdout or "").strip()
+    stderr = (result.stderr or "").strip()
+
+    # The CLI returns a JSON envelope; on errors (e.g. a usage limit) the human
+    # reason lives in its "result" field, not stderr — pull it out either way.
+    text = stdout
     try:
         envelope = json.loads(stdout)
-        text = envelope.get("result", stdout) if isinstance(envelope, dict) else stdout
+        if isinstance(envelope, dict):
+            text = envelope.get("result") or envelope.get("error") or stdout
     except json.JSONDecodeError:
-        text = stdout
+        pass
+
+    if getattr(result, "returncode", 0) != 0:
+        detail = (text or stderr or f"exit {result.returncode}").strip()
+        raise RuntimeError(f"Claude CLI error: {detail[:300]}")
     return extract_recommendation(text)
 
 
@@ -234,10 +428,10 @@ def _analyze_via_sdk(ctx: dict) -> dict:
 
     client = anthropic.Anthropic()
     message = client.messages.create(
-        model=AI_SDK_MODEL,
+        model=_sdk_model_for(ctx.get("mode", "full")),
         max_tokens=AI_MAX_TOKENS,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": f"{format_prompt(ctx)}\n\n{_JSON_INSTRUCTION}"}],
+        system=_system_for(ctx.get("mode", "full")),
+        messages=[{"role": "user", "content": f"{format_prompt(ctx)}\n\n{_json_instruction(ctx)}"}],
     )
     text = "".join(b.text for b in message.content if getattr(b, "type", None) == "text")
     return extract_recommendation(text)
@@ -254,7 +448,9 @@ def _first_json_object(text: str) -> dict:
         text = text.strip("`")
         if text.lower().startswith("json"):
             text = text[4:]
-    decoder = json.JSONDecoder()
+    # strict=False tolerates literal newlines/tabs the model sometimes leaves
+    # unescaped inside the "reasoning" string, which would else break parsing.
+    decoder = json.JSONDecoder(strict=False)
     index = 0
     while True:
         start = text.find("{", index)
