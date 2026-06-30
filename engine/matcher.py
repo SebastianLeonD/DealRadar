@@ -22,10 +22,10 @@ from engine.calibration import select_sharpest_book
 from engine.consensus import line_matched_consensus
 from engine.exposure import apply_exposure_caps
 from engine.name_matcher import match_player_name
+from engine.portfolio import construct_slips
 from engine.probability import (
     BREAKEVEN_PROB,
     assign_verdict,
-    best_slips,
     consensus_probability,
     ev_percent,
     fit_lambda_from_anchor,
@@ -459,6 +459,7 @@ def print_slip_suggestions(flagged_bets: list[dict]) -> None:
         yes_picks.append({
             'player': f"{bet['Player']} {bet['Play'].lower()} {bet['PP_Line']} {stat_label}",
             'team': bet['Team'],
+            'game_id': bet.get('game_id') or bet.get('Team'),
             'win_prob': bet['win_prob'],
         })
     if len(yes_picks) < 2:
@@ -476,17 +477,21 @@ def print_slip_suggestions(flagged_bets: list[dict]) -> None:
         print("Fewer than 2 legs survive exposure caps — no slip recommendation.")
         return
 
-    suggestions = best_slips(kept)
+    # Correlation-aware slip construction (council OBJ-12/35/39): FLEX EV and
+    # variance come from a Gaussian-copula simulation under the same-game
+    # correlation prior, never from per-leg-separable independence.
+    suggestions = construct_slips(kept)
     if not suggestions:
+        print("\nNo positive-EV slip within the variance cap tonight.")
         return
 
-    print("\nBest slips (POWER per-leg gate exact; FLEX EV is a heuristic — caps applied):")
-    for suggestion in suggestions[:3]:
-        corr = '  [same-team legs!]' if suggestion['correlated_teams'] else ''
+    print("\nBest slips (correlation-aware EV/variance/Kelly; same-game legs correlated):")
+    for s in suggestions:
+        corr = '  [correlated legs]' if s['correlated_legs'] else ''
         print(
-            f"  {suggestion['structure'].ljust(13)} EV {suggestion['ev_percent']:+.1f}%  "
-            f"stake {suggestion.get('kelly_pct', 0):.1f}% bankroll  "
-            f"{', '.join(suggestion['players'])}{corr}"
+            f"  {s['structure'].ljust(13)} EV {s['ev_percent']:+.1f}%  "
+            f"std {s['std']:.2f}  stake {s['kelly_pct']:.1f}% bankroll  "
+            f"P(all)={s['p_all_hit']:.1%}  {', '.join(s['players'])}{corr}"
         )
 
 
