@@ -17,6 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from engine.calibration import line_band as calc_line_band
+from engine.calibration import select_sharpest_book
 from engine.consensus import line_matched_consensus
 from engine.exposure import apply_exposure_caps
 from engine.name_matcher import match_player_name
@@ -30,7 +32,8 @@ from engine.probability import (
     poisson_p_over_push_adjusted,
     prob_over_at_line,
 )
-from engine.sports import get_sport
+from engine.config import snapshot_bucket as _snapshot_bucket
+from engine.sports import active_sport_key, get_sport
 from scrapers.injuries_api import get_injury_map, injury_status, is_risky_status
 from storage.db_manager import get_latest_props, get_sharp_ladders, ingest_staging, log_edges
 
@@ -45,6 +48,22 @@ def _parse_ts(value: str | None) -> datetime | None:
     try:
         return datetime.fromisoformat(value)
     except ValueError:
+        return None
+
+
+def _edge_game_date(commence_time: str | None, captured_at: str | None) -> str | None:
+    """US game date (YYYY-MM-DD) for the cluster key, from kickoff or capture."""
+    ts = _parse_ts(commence_time) or _parse_ts(captured_at)
+    return ts.date().isoformat() if ts else None
+
+
+def _edge_bucket(captured_at: str | None) -> str | None:
+    """Snapshot bucket for OBJ-30 dedup; None when no capture timestamp exists."""
+    if not captured_at:
+        return None
+    try:
+        return _snapshot_bucket(captured_at)
+    except (ValueError, TypeError):
         return None
 
 
@@ -121,6 +140,11 @@ def evaluate_player(
     # most favours the side we are playing becomes the comparison anchor.
     best_book = (max if play == 'OVER' else min)(book_probs, key=book_probs.get)
 
+    # Phase-2 baseline (council OBJ-31): the single sharpest book's raw P(over)
+    # at the exact PP line is the null the consensus must out-Brier OOS.
+    sharp = select_sharpest_book(exact_line_probs) if exact_line_probs else None
+    baseline_book, baseline_p = sharp if sharp else (None, None)
+
     # Anchor line for display/CLV: DraftKings' closest line, else first book's.
     anchor_book = 'draftkings' if 'draftkings' in books else next(iter(books))
     anchor_line = min(
@@ -151,6 +175,12 @@ def evaluate_player(
         'consensus_n': cons['consensus_n'],
         'consensus_tag': cons['consensus_tag'],
         'best_book': best_book,
+        # Phase-2 canonical-event fields persisted at flag time.
+        'consensus_p': round(consensus_over, 4),     # un-folded P(over)
+        'win_prob_raw': round(win_prob, 4),          # asserted shape P(side)
+        'baseline_p': round(baseline_p, 4) if baseline_p is not None else None,
+        'baseline_book': baseline_book,
+        'line_band': calc_line_band(pp_player['stat_type'], pp_line),
         'spread': spread,
         'anchor_line': anchor_line,
         'edge_type': edge_type,
@@ -246,6 +276,7 @@ def find_edges(sync_staging: bool = True):
             print(f"Warning: {error}")
 
     sport = get_sport()
+    active_sport = active_sport_key()
     injury_map = get_injury_map() if sport['has_injury_feed'] else {}
     flagged_bets = []
     unmatched = []
@@ -342,6 +373,16 @@ def find_edges(sync_staging: bool = True):
                 'consensus_n': evaluation.get('consensus_n'),
                 'consensus_tag': evaluation.get('consensus_tag'),
                 'best_book': evaluation.get('best_book'),
+                # Phase-2 canonical-event triple + cluster/stratum keys.
+                'consensus_p': evaluation.get('consensus_p'),
+                'win_prob_raw': evaluation.get('win_prob_raw'),
+                'baseline_p': evaluation.get('baseline_p'),
+                'baseline_book': evaluation.get('baseline_book'),
+                'line_band': evaluation.get('line_band'),
+                'sport': active_sport,
+                'game_date': _edge_game_date(evaluation['commence_time'],
+                                             pp_player.get('captured_at')),
+                'snapshot_bucket': _edge_bucket(pp_player.get('captured_at')),
                 'commence_time': evaluation['commence_time'],
                 'pp_captured_at': pp_player.get('captured_at'),
                 'dk_captured_at': evaluation['sharp_captured_at'],

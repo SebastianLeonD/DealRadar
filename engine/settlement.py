@@ -5,6 +5,7 @@ tells you if the model's probabilities are honest. Run any time after games
 finish; already-settled edges are skipped.
 """
 
+import math
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -64,6 +65,47 @@ def grade(play: str, pp_line: float, actual: float) -> str:
     return 'WIN' if actual < pp_line else 'LOSS'
 
 
+def classify_settlement(
+    play: str,
+    pp_line: float,
+    actual: float | None,
+    *,
+    minutes: float | None = None,
+    min_minutes: float = 0.0,
+    partial_floor: float | None = None,
+) -> dict:
+    """Phase-2 settlement partition (spec §3.1/§3.2). Participation is checked
+    BEFORE the over/under decision, so a benched/partial player is never graded
+    as a win on a low line.
+
+    Returns {status, outcome_over, void_reason, partial_game} where status is
+    one of SCORED / PUSH / VOID / NO_DATA (None). The canonical outcome is FIXED
+    OVER: outcome_over = 1 if actual > pp_line else 0 (side-agnostic), NULL on
+    PUSH/VOID. Invariant: status=='SCORED' iff outcome_over is not None.
+    """
+    if not math.isfinite(pp_line):
+        raise AssertionError(f"classify_settlement: non-finite pp_line {pp_line!r}")
+    if actual is None:
+        return {'status': None, 'outcome_over': None,
+                'void_reason': None, 'partial_game': 0}
+    assert math.isfinite(actual), f"non-finite actual {actual!r}"
+
+    # Participation gate first (strict minutes floor: minutes < floor -> VOID).
+    if minutes is not None:
+        if minutes < min_minutes:
+            return {'status': 'VOID', 'outcome_over': None,
+                    'void_reason': 'below_minutes_threshold', 'partial_game': 0}
+        if partial_floor is not None and minutes < partial_floor:
+            return {'status': 'VOID', 'outcome_over': None,
+                    'void_reason': 'partial_game', 'partial_game': 1}
+
+    if actual == pp_line:
+        return {'status': 'PUSH', 'outcome_over': None,
+                'void_reason': None, 'partial_game': 0}
+    return {'status': 'SCORED', 'outcome_over': 1 if actual > pp_line else 0,
+            'void_reason': None, 'partial_game': 0}
+
+
 def settle_edges() -> tuple[int, list[str]]:
     """Settle every gradeable edge. Returns (settled count, report lines)."""
     now = datetime.now(timezone.utc)
@@ -115,7 +157,15 @@ def settle_edges() -> tuple[int, list[str]]:
             continue
 
         result = grade(edge['play'], edge['pp_line'], actual)
-        settle_edge(edge['id'], result, actual)
+        # Phase-2 partition (minutes unavailable from the box-score merge today,
+        # so participation gating is a no-op until a minutes feed lands; the
+        # canonical OVER outcome + status are persisted regardless).
+        part = classify_settlement(edge['play'], edge['pp_line'], actual)
+        settle_edge(
+            edge['id'], result, actual,
+            settlement_status=part['status'], outcome_over=part['outcome_over'],
+            void_reason=part['void_reason'], partial_game=part['partial_game'],
+        )
         settled += 1
         stat_label = edge['stat_type'].replace('player_', '')
         lines.append(

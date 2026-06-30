@@ -152,6 +152,39 @@ def poisson_p_over_push_adjusted(lam: float, line: float) -> float:
     return over / decided if decided > 0 else 0.5
 
 
+def push_conditional(p_over: float, line: float, p_push: float | None) -> float:
+    """Renormalize a raw P(over) into push-conditional space on integer lines
+    (Phase-2 calibration spec §0.1). Half-lines (x.5) and p_push None/0 are
+    returned unchanged. On integer lines the push mass is carved out and the
+    remaining decided mass renormalized: over / (over + under), with
+    under = 1 - over - p_push. Returns 0.5 if no decided mass survives.
+    """
+    if line == int(line) and p_push:
+        under = 1.0 - p_over - p_push
+        decided = p_over + under
+        return p_over / decided if decided > 0 else 0.5
+    return p_over
+
+
+def normal_p_over_push_adjusted(mu: float, sigma: float, line: float) -> float:
+    """P(over | no push) for a Normal(mu, sigma), mirroring the Poisson path so
+    both model families condition on no-push identically (Phase-2 spec §0.1).
+
+    Half-line: 1 - cdf(line) (no push, returned unchanged). Integer line L for
+    an integer-valued stat (X rounds to nearest integer): over wins on X > L+0.5,
+    under on X < L-0.5, push on L-0.5 < X < L+0.5. So over = 1 - cdf(L+0.5),
+    push mass = cdf(L+0.5) - cdf(L-0.5), renormalized via push_conditional. A
+    centered Normal (mu == L) therefore returns exactly 0.5, as it must by
+    symmetry. The Normal was previously unconditional on integer lines.
+    """
+    dist = NormalDist(mu, sigma)
+    if line != int(line):
+        return 1.0 - dist.cdf(line)
+    over = 1.0 - dist.cdf(line + 0.5)
+    p_push = dist.cdf(line + 0.5) - dist.cdf(line - 0.5)
+    return push_conditional(over, line, p_push)
+
+
 def fit_lambda_from_anchor(line: float, p_over: float) -> float:
     """Solve the Poisson rate from one (line, P(over)) anchor point."""
     p_over = min(max(p_over, 0.001), 0.999)

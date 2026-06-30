@@ -56,6 +56,26 @@ MIN_SETTLED_SLIPS = 100
 # False-discovery rate for the per-stratum paired-bootstrap Brier test (OBJ-10).
 FDR_ALPHA = 0.05
 
+# Every clustered statistic (Brier bootstrap-t AND reliability-slope SE) abstains
+# below this many DISTINCT games — the cluster-robust meat has rank <= G, so SEs
+# below the floor are spurious (Phase-2 spec §0.5). Separate from, and smaller
+# than, the larger MIN_INDEPENDENT_GAMES verdict gate.
+MIN_CLUSTERS_FOR_TEST = 30
+CALIB_BOOTSTRAP_R = 2000          # bootstrap-t resamples
+CALIB_BOOTSTRAP_SEED = 1234567    # fixed: run_calibration is reproducible
+# Reliability slope: the gate is the point-null "CI covers 1.0"; this practical
+# band is a reported diagnostic only (Phase-2 spec §0.3).
+RELIABILITY_SLOPE_LO = 0.85
+RELIABILITY_SLOPE_HI = 1.15
+SE_DEGENERACY_REL = 1e-9          # below this total-SS the paired d is constant -> abstain
+
+# --- Settlement (Phase-2) ---------------------------------------------------
+# Strict minutes floor per sport: minutes < floor -> VOID (a recorded 0.0 with a
+# 0.0 floor is NOT voided). Partial-game floor flags but retains the row.
+PP_MIN_MINUTES = {"nba": 0.0}
+PP_PARTIAL_FLOOR = {"nba": 12.0}
+STALE_SETTLE_MAX_HOURS = 72       # deterministic force-VOID horizon (replayable)
+
 # --- Credit / robustness (engineering) --------------------------------------
 MAX_CREDITS_PER_SLATE = 500
 # Deterministic truncation order: keep the sharpest books, drop the rest first

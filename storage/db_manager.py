@@ -113,6 +113,26 @@ EDGES_MIGRATION_COLUMNS = {
     'consensus_n': 'INTEGER',
     'consensus_tag': 'TEXT',
     'config_version': 'TEXT',
+    # Phase-2 settlement partition (spec §3.1).
+    'settlement_status': 'TEXT',            # NULL|'SCORED'|'PUSH'|'VOID' (NO_DATA=NULL)
+    'outcome_over': 'INTEGER',              # 1 over won / 0 over lost / NULL push|void
+    'partial_game': 'INTEGER NOT NULL DEFAULT 0',
+    'void_reason': 'TEXT',
+    'first_unsettled_at': 'TEXT',
+    'force_voided_at': 'TEXT',
+    # Phase-2 canonical-event triple (the three probs the test reads, spec §3.3).
+    'consensus_p': 'REAL',                  # un-folded P(over), push-conditional on int lines
+    'consensus_push_mass': 'REAL',
+    'baseline_p': 'REAL',                   # single-sharpest-book raw P(over), push-conditional
+    'baseline_book': 'TEXT',
+    'baseline_hold': 'REAL',
+    'win_prob_raw': 'REAL',                 # asserted Normal P(side); secondary arm only
+    # Clustering + stratum keys (spec §4).
+    'game_id': 'TEXT',
+    'game_date': 'TEXT',
+    'sport': 'TEXT',
+    'line_band': 'TEXT',
+    'snapshot_bucket': 'TEXT',
 }
 
 
@@ -136,6 +156,29 @@ def _migrate(connection: sqlite3.Connection) -> None:
 
     # The upsert key now includes bookmaker; replace the old unique index.
     connection.execute("DROP INDEX IF EXISTS idx_props_upsert")
+
+    # Phase-2 idempotent backfill (spec §4.2): translate legacy WIN/LOSS/PUSH/VOID
+    # 'result' rows into the new settlement partition so the calibration read is
+    # non-empty post-migration. Guarded by settlement_status IS NULL so a second
+    # init_db run is a no-op. consensus_p/baseline_p are NOT backfillable (the
+    # push mass / sharp-book quote were never persisted) -> left NULL, correctly
+    # excluded by the read's NOT-NULL predicate rather than mis-paired.
+    edge_cols = {row[1] for row in connection.execute("PRAGMA table_info(edges)")}
+    if 'settlement_status' in edge_cols and 'outcome_over' in edge_cols:
+        connection.execute(
+            "UPDATE edges SET settlement_status='SCORED', outcome_over="
+            "CASE WHEN (result='WIN' AND play='OVER') OR (result='LOSS' AND play='UNDER') "
+            "THEN 1 ELSE 0 END "
+            "WHERE result IN ('WIN','LOSS') AND settlement_status IS NULL"
+        )
+        connection.execute(
+            "UPDATE edges SET settlement_status='PUSH' "
+            "WHERE result='PUSH' AND settlement_status IS NULL"
+        )
+        connection.execute(
+            "UPDATE edges SET settlement_status='VOID' "
+            "WHERE result='VOID' AND settlement_status IS NULL"
+        )
 
     # Rows ingested before the bookmaker column got the 'draftkings' default;
     # re-label PP rows so per-bookmaker grouping never duplicates a player.
@@ -424,9 +467,13 @@ def log_edges(
                     pp_line, dk_line_at_flag, edge_type, dk_over_prob,
                     dk_under_prob, probability_text, win_prob, ev_percent,
                     verdict, flags, book_count, commence_time,
-                    consensus_n, consensus_tag, config_version, flagged_at,
+                    consensus_n, consensus_tag, config_version,
+                    consensus_p, consensus_push_mass, baseline_p, baseline_book,
+                    baseline_hold, win_prob_raw, game_id, game_date, sport,
+                    line_band, snapshot_bucket, flagged_at,
                     pp_captured_at, dk_captured_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     edge['pp_player_name'],
@@ -449,6 +496,17 @@ def log_edges(
                     edge.get('consensus_n'),
                     edge.get('consensus_tag'),
                     CONFIG_VERSION,
+                    edge.get('consensus_p'),
+                    edge.get('consensus_push_mass'),
+                    edge.get('baseline_p'),
+                    edge.get('baseline_book'),
+                    edge.get('baseline_hold'),
+                    edge.get('win_prob_raw'),
+                    edge.get('game_id'),
+                    edge.get('game_date'),
+                    edge.get('sport'),
+                    edge.get('line_band'),
+                    edge.get('snapshot_bucket'),
                     timestamp,
                     edge.get('pp_captured_at'),
                     edge.get('dk_captured_at'),
@@ -498,17 +556,28 @@ def get_unsettled_edges(db_path: Path = DB_PATH) -> list[dict]:
 def settle_edge(
     edge_id: int,
     result: str,
-    actual_value: float,
+    actual_value: float | None,
     db_path: Path = DB_PATH,
+    *,
+    settlement_status: str | None = None,
+    outcome_over: int | None = None,
+    void_reason: str | None = None,
+    partial_game: int = 0,
 ) -> None:
+    """Settle one edge. Writes the legacy result AND the Phase-2 settlement
+    partition (settlement_status / outcome_over / void_reason / partial_game)
+    so the calibration read has a well-defined SCORED pool (spec §3)."""
     with get_connection(db_path) as connection:
         connection.execute(
             """
             UPDATE edges
-            SET result = ?, actual_value = ?, settled_at = ?
+            SET result = ?, actual_value = ?, settled_at = ?,
+                settlement_status = ?, outcome_over = ?,
+                void_reason = ?, partial_game = ?
             WHERE id = ?
             """,
-            (result, actual_value, utc_now(), edge_id),
+            (result, actual_value, utc_now(), settlement_status, outcome_over,
+             void_reason, partial_game, edge_id),
         )
         connection.commit()
 
@@ -536,6 +605,7 @@ def get_record_summary(db_path: Path = DB_PATH) -> dict:
         'wins': 0,
         'losses': 0,
         'pushes': 0,
+        'voids': 0,
         'hit_rate': None,
         'avg_predicted_prob': None,
         'by_verdict': {},
@@ -545,13 +615,19 @@ def get_record_summary(db_path: Path = DB_PATH) -> dict:
     for row in rows:
         result = row['result']
         verdict = row['verdict'] or 'UNRATED'
-        bucket = summary['by_verdict'].setdefault(verdict, {'wins': 0, 'losses': 0, 'pushes': 0})
+        bucket = summary['by_verdict'].setdefault(
+            verdict, {'wins': 0, 'losses': 0, 'pushes': 0, 'voids': 0})
         if result == 'WIN':
             summary['wins'] += 1
             bucket['wins'] += 1
         elif result == 'LOSS':
             summary['losses'] += 1
             bucket['losses'] += 1
+        elif result == 'VOID':
+            # A VOID is a refund, not a push — never fold it into the push count
+            # or the hit-rate denominator (council OBJ-33, spec §3.6).
+            summary['voids'] += 1
+            bucket['voids'] += 1
         else:
             summary['pushes'] += 1
             bucket['pushes'] += 1
