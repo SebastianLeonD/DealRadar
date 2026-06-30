@@ -31,6 +31,12 @@ from engine.config import DEFAULT_DEVIG_METHOD
 from engine.devig import devig_two_sided
 from engine.probability import devig_one_sided, implied_prob
 from engine.sports import get_sport
+from scrapers.http_client import (
+    FETCH_OK,
+    CreditBudget,
+    estimate_event_cost,
+    fetch_json,
+)
 
 load_dotenv()
 API_KEY = os.getenv('ODDS_API_KEY')
@@ -134,6 +140,12 @@ def filter_upcoming(events: list[dict], sport: dict) -> list[dict]:
 
 
 def fetch_event_odds(event_id: str, sport: dict):
+    """Fetch one event's odds through the robust client (council http-robustness).
+
+    Returns (data_or_None, usage, fetch_status). A persistent failure is a
+    TYPED status (http_error/timeout/empty), never a silent drop — so a missing
+    game is distinguishable from an empty slate downstream.
+    """
     url = f"https://api.the-odds-api.com/v4/sports/{sport['odds_api_key']}/events/{event_id}/odds"
     params = {
         'apiKey': API_KEY,
@@ -142,16 +154,13 @@ def fetch_event_odds(event_id: str, sport: dict):
         'oddsFormat': 'american',
     }
 
-    response = requests.get(url, params=params)
-    if response.status_code != 200:
-        print(f"Failed to fetch odds for event {event_id}: {response.text}")
-        return None, {}
-
-    usage = {
-        'used': response.headers.get('x-requests-used'),
-        'remaining': response.headers.get('x-requests-remaining'),
-    }
-    return response.json(), usage
+    result = fetch_json(url, params, get_fn=requests.get)
+    usage = {'used': result.used, 'remaining': result.remaining}
+    if result.status != FETCH_OK:
+        print(f"Odds fetch for event {event_id}: status={result.status} "
+              f"after {result.attempts} attempt(s)")
+        return None, usage, result.status
+    return result.data, usage, result.status
 
 
 def collect_player_lines(market):
@@ -257,13 +266,29 @@ def main():
     all_records = []
     usage = {}
 
+    # Credit budget with a hard stop (council credit-cost): cost per event call
+    # is markets x regions; we use one 'us' region, so cost = #markets.
+    budget = CreditBudget()
+    per_event_cost = estimate_event_cost(len(market_list(sport)), n_regions=1)
+    failed = 0
+
     for game in upcoming:
+        if not budget.can_afford(per_event_cost) or budget.exhausted():
+            print(f"Credit budget reached ({budget.spent}/{budget.max_credits}); "
+                  f"stopping before {game['away_team']} @ {game['home_team']}.")
+            break
         print(f"Fetching props: {game['away_team']} @ {game['home_team']} ({game['commence_time']})...")
-        game_odds, usage = fetch_event_odds(game['id'], sport)
-        if not game_odds:
+        game_odds, usage, status = fetch_event_odds(game['id'], sport)
+        budget.charge(per_event_cost)
+        budget.reconcile(usage.get('used'), usage.get('remaining'))
+        if status != FETCH_OK or not game_odds:
+            failed += 1
             continue
         all_records.extend(flatten_game(game, game_odds, sport))
         time.sleep(0.5)
+
+    if failed:
+        print(f"{failed} event(s) failed to fetch (typed failure, not silently dropped).")
 
     books_seen = sorted({record['Bookmaker'] for record in all_records})
     players_seen = {record['Player'] for record in all_records}

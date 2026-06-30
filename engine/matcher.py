@@ -17,6 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from engine.consensus import line_matched_consensus
+from engine.exposure import apply_exposure_caps
 from engine.name_matcher import match_player_name
 from engine.probability import (
     BREAKEVEN_PROB,
@@ -101,6 +103,24 @@ def evaluate_player(
     play = 'OVER' if consensus_over >= 0.5 else 'UNDER'
     win_prob = consensus_over if play == 'OVER' else 1 - consensus_over
 
+    # IDENTIFIED line-matched consensus (council OBJ-1/3): only books quoting the
+    # EXACT PP line contribute. The interpolated win_prob above is shape-
+    # contingent; consensus_tag records whether an identified (>=2 same-line
+    # books) ground truth backs this edge or it rests on the asserted shape.
+    exact_line_probs = {
+        book: p_over
+        for book, entry in books.items()
+        for line, p_over in entry['points']
+        if abs(line - pp_line) < 1e-9
+    }
+    cons = line_matched_consensus(exact_line_probs) if exact_line_probs else {
+        'consensus_n': 0, 'consensus_tag': 'degraded',
+    }
+
+    # Cross-book line shopping (council Pillar 3): the book whose de-vigged prob
+    # most favours the side we are playing becomes the comparison anchor.
+    best_book = (max if play == 'OVER' else min)(book_probs, key=book_probs.get)
+
     # Anchor line for display/CLV: DraftKings' closest line, else first book's.
     anchor_book = 'draftkings' if 'draftkings' in books else next(iter(books))
     anchor_line = min(
@@ -128,6 +148,9 @@ def evaluate_player(
         'flags': flags,
         'book_count': len(book_probs),
         'consensus_over': consensus_over,
+        'consensus_n': cons['consensus_n'],
+        'consensus_tag': cons['consensus_tag'],
+        'best_book': best_book,
         'spread': spread,
         'anchor_line': anchor_line,
         'edge_type': edge_type,
@@ -316,6 +339,9 @@ def find_edges(sync_staging: bool = True):
                 'verdict': evaluation['verdict'],
                 'flags': ' | '.join(evaluation['flags']) or None,
                 'book_count': evaluation['book_count'],
+                'consensus_n': evaluation.get('consensus_n'),
+                'consensus_tag': evaluation.get('consensus_tag'),
+                'best_book': evaluation.get('best_book'),
                 'commence_time': evaluation['commence_time'],
                 'pp_captured_at': pp_player.get('captured_at'),
                 'dk_captured_at': evaluation['sharp_captured_at'],
@@ -398,11 +424,22 @@ def print_slip_suggestions(flagged_bets: list[dict]) -> None:
         print("\nFewer than 2 YES plays — no slip recommendation tonight.")
         return
 
-    suggestions = best_slips(yes_picks)
+    # Binding exposure caps (council Pillar 3): same-game/same-player legs are
+    # capped before slips are built, so an independence-assuming break-even is
+    # never applied to a silently correlated slip.
+    kept, dropped = apply_exposure_caps(yes_picks)
+    if dropped:
+        print(f"\nExposure caps dropped {len(dropped)} leg(s): "
+              + "; ".join(f"{d['player']} ({d['drop_reason']})" for d in dropped))
+    if len(kept) < 2:
+        print("Fewer than 2 legs survive exposure caps — no slip recommendation.")
+        return
+
+    suggestions = best_slips(kept)
     if not suggestions:
         return
 
-    print("\nBest slips (independence assumed; correlated = same-team legs):")
+    print("\nBest slips (POWER per-leg gate exact; FLEX EV is a heuristic — caps applied):")
     for suggestion in suggestions[:3]:
         corr = '  [same-team legs!]' if suggestion['correlated_teams'] else ''
         print(
