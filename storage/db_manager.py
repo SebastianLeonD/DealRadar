@@ -112,6 +112,7 @@ EDGES_MIGRATION_COLUMNS = {
     # Consensus provenance + reproducibility stamp (OBJ-1/3, OBJ-41).
     'consensus_n': 'INTEGER',
     'consensus_tag': 'TEXT',
+    'best_book': 'TEXT',                    # cross-book line-shopping anchor (Pillar 3)
     'config_version': 'TEXT',
     # Phase-2 settlement partition (spec §3.1).
     'settlement_status': 'TEXT',            # NULL|'SCORED'|'PUSH'|'VOID' (NO_DATA=NULL)
@@ -467,13 +468,13 @@ def log_edges(
                     pp_line, dk_line_at_flag, edge_type, dk_over_prob,
                     dk_under_prob, probability_text, win_prob, ev_percent,
                     verdict, flags, book_count, commence_time,
-                    consensus_n, consensus_tag, config_version,
+                    consensus_n, consensus_tag, best_book, config_version,
                     consensus_p, consensus_push_mass, baseline_p, baseline_book,
                     baseline_hold, win_prob_raw, game_id, game_date, sport,
                     line_band, snapshot_bucket, flagged_at,
                     pp_captured_at, dk_captured_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     edge['pp_player_name'],
@@ -495,6 +496,7 @@ def log_edges(
                     edge.get('commence_time'),
                     edge.get('consensus_n'),
                     edge.get('consensus_tag'),
+                    edge.get('best_book'),
                     CONFIG_VERSION,
                     edge.get('consensus_p'),
                     edge.get('consensus_push_mass'),
