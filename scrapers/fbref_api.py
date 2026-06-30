@@ -121,8 +121,10 @@ def last_n_player_logs(
 
     `records` are normalized match records (from normalize_player_match_rows).
     `players` limits the result to a slate's players; None returns all. Records
-    are ordered by date descending (string ISO dates sort correctly); records
-    with no date keep input order as a fallback.
+    are ordered by date descending (ISO date strings sort correctly). When dates
+    are missing, ties break on input position descending — i.e. later input rows
+    are treated as more recent, so a chronologically-ordered input still yields
+    the most-recent-n.
     """
     wanted = {p for p in players} if players is not None else None
     by_player: dict[str, list[dict]] = {}
