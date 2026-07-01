@@ -271,11 +271,13 @@ def main():
     budget = CreditBudget()
     per_event_cost = estimate_event_cost(len(market_list(sport)), n_regions=1)
     failed = 0
+    budget_stopped = False
 
     for game in upcoming:
         if not budget.can_afford(per_event_cost) or budget.exhausted():
             print(f"Credit budget reached ({budget.spent}/{budget.max_credits}); "
                   f"stopping before {game['away_team']} @ {game['home_team']}.")
+            budget_stopped = True
             break
         print(f"Fetching props: {game['away_team']} @ {game['home_team']} ({game['commence_time']})...")
         game_odds, usage, status = fetch_event_odds(game['id'], sport)
@@ -297,10 +299,15 @@ def main():
     if usage.get('remaining') is not None:
         print(f"Odds-API credits — used: {usage['used']}, remaining: {usage['remaining']}")
 
+    # fetch_complete=False when any per-game fetch failed or the credit budget
+    # cut the slate short — downstream consensus must not treat a partial
+    # fetch as if every book was actually reached (council OBJ-1/3).
+    fetch_complete = not budget_stopped and failed == 0
+
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     with OUTPUT_FILE.open('w') as file:
-        json.dump(all_records, file, indent=4)
-    print(f"Saved sharp board to {OUTPUT_FILE}")
+        json.dump({'fetch_complete': fetch_complete, 'records': all_records}, file, indent=4)
+    print(f"Saved sharp board to {OUTPUT_FILE} (fetch_complete={fetch_complete})")
 
 
 if __name__ == '__main__':

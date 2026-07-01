@@ -74,3 +74,40 @@ def test_ai_failure_keeps_yes_and_flags_unavailable(monkeypatch):
     assert bet["verdict"] == "YES"
     assert bet["flags"] == "AI check unavailable"
     assert "ai_pick" not in bet
+
+
+def test_malformed_ai_json_keeps_yes_not_downgraded(monkeypatch):
+    # Parsed fine as JSON, but no valid 'pick' — this is malformed output, not
+    # a genuine PASS, and must not read as disagreement (council finding).
+    bet = _yes_bet()
+
+    def fake_analyze(edge, **kwargs):
+        from engine.ai_analyst import extract_recommendation
+        return extract_recommendation('{"confidence": 80, "reasoning": "no pick field"}')
+
+    monkeypatch.setattr(matcher, "analyze_play", fake_analyze)
+    _apply_ai_gate(bet)
+
+    assert bet["verdict"] == "YES"
+    assert bet["flags"] == "AI check unavailable"
+    assert "ai_pick" not in bet
+
+
+def test_genuine_ai_pass_still_downgrades_yes(monkeypatch):
+    bet = _yes_bet()
+
+    def fake_analyze(edge, **kwargs):
+        return {
+            "pick": "PASS",
+            "confidence": 60,
+            "agrees_with_engine": False,
+            "reasoning": "Genuinely thin edge.",
+            "key_factors": [],
+            "malformed": False,
+        }
+
+    monkeypatch.setattr(matcher, "analyze_play", fake_analyze)
+    _apply_ai_gate(bet)
+
+    assert bet["verdict"] == "LEAN"
+    assert bet["ai_pick"] == "PASS"

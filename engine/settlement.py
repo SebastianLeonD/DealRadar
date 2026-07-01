@@ -84,6 +84,7 @@ def _participation_minutes(sport: dict, box: dict, matched_names: list[str]) -> 
     for name in matched_names:
         value = box[name].get(participation_stat)
         if value is None:
+            print(f"WARNING: participation data missing for {name} — DNP gate skipped")
             continue
         leg_minutes = 90.0 if value >= 1.0 else 0.0
         minutes = leg_minutes if minutes is None else min(minutes, leg_minutes)

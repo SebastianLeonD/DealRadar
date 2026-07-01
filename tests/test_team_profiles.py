@@ -79,3 +79,10 @@ def test_opponent_defense_line_includes_rank():
     form = team_form("Brazil", "United States", PROFILES)
     assert "rank 1/2" in form["opponent_defense"]
     assert form["opponent_defense_rank"] == (1, 2)
+
+
+def test_opponent_sot_against_exposed_for_ai_prompt():
+    # AI prompt needs the raw shots-on-target-conceded number alongside the
+    # rank tuple, not just the pre-formatted string.
+    form = team_form("Brazil", "United States", PROFILES)
+    assert form["opponent_sot_against"] == 2.0

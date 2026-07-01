@@ -231,7 +231,13 @@ def evaluate_player(
         for line, p_over in entry['points']
         if abs(line - pp_line) < 1e-9
     }
-    cons = line_matched_consensus(exact_line_probs) if exact_line_probs else {
+    # An incomplete DK/Odds-API fetch (budget cutoff or per-game failure —
+    # scrapers/draftkings_api.py's fetch_complete flag, threaded through
+    # storage.get_sharp_ladders as each book entry's 'fetch_complete') must
+    # withhold the 'identified' tag even if 2+ books happen to be present: we
+    # can't claim consensus over a slate we didn't fully fetch.
+    budget_truncated = any(not entry.get('fetch_complete', True) for entry in books.values())
+    cons = line_matched_consensus(exact_line_probs, budget_truncated=budget_truncated) if exact_line_probs else {
         'consensus_n': 0, 'consensus_tag': 'degraded',
     }
 
@@ -337,10 +343,18 @@ def evaluate_combo(
         matched_legs.append(sharp_name)
         worst_score = min(worst_score, score)
 
+    # Same dead/stale-ladder hygiene as evaluate_player, applied per leg —
+    # combos priced off a finished-game or stale book quote were slipping
+    # through since these drops previously only ran in evaluate_player.
+    leg_books = {
+        leg_name: _drop_stale_books(_drop_dead_books(ladders[leg_name]))
+        for leg_name in matched_legs
+    }
+
     # A book can price the combo only if it quotes every leg.
-    common_books = set(ladders[matched_legs[0]].keys())
+    common_books = set(leg_books[matched_legs[0]])
     for leg_name in matched_legs[1:]:
-        common_books &= set(ladders[leg_name].keys())
+        common_books &= set(leg_books[leg_name])
     if not common_books:
         return None
 
@@ -353,7 +367,7 @@ def evaluate_combo(
     for book in common_books:
         lam_total = 0.0
         for leg_name in matched_legs:
-            entry = ladders[leg_name][book]
+            entry = leg_books[leg_name][book]
             points = entry['points']
             anchor_line, anchor_prob = min(
                 points, key=lambda pt: abs(pt[0] - per_leg_target)
@@ -545,8 +559,12 @@ AI_GATE_TIMEOUT_SECONDS = 90  # shorter than analyze_play's own internal timeout
 
 def _apply_ai_gate_result(bet: dict, rec: dict | None) -> None:
     """Apply an AI gate outcome to a bet in place. rec=None means AI-unavailable
-    (backend down, timeout, parse error) — verdict stays YES with a flag."""
-    if rec is None:
+    (backend down, timeout, parse error) — verdict stays YES with a flag.
+
+    A parsed-but-malformed response (valid JSON, no usable 'pick') is also
+    treated as AI-unavailable rather than an explicit PASS — the model didn't
+    actually weigh in, so it must not be read as disagreement."""
+    if rec is None or rec.get('malformed'):
         bet['flags'] = ' | '.join(f for f in [bet.get('flags'), 'AI check unavailable'] if f)
         return
 

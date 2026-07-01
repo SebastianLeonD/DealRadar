@@ -64,6 +64,28 @@ def test_opponent_from_game_handles_bad_input():
     assert opponent_from_game(float("nan"), float("nan")) == ""  # NaN rows from pandas
 
 
+def test_prompt_includes_concrete_defense_rank_not_just_instruction(monkeypatch):
+    # The canned "weigh the matchup" instruction must carry the actual
+    # rank/SOT numbers, not just the generic prose (council finding: garnish
+    # with no substance).
+    def fake_team_form(team, opponent, profiles=None):
+        return {
+            "team_attack": "12.0/g shots",
+            "team_games": 3,
+            "opponent_defense": "1.0/g conceded, 2.0/g on target faced (rank 2/32 — elite defense)",
+            "opponent_games": 3,
+            "opponent_defense_rank": (2, 32),
+            "opponent_sot_against": 2.0,
+        }
+
+    monkeypatch.setattr("engine.team_profiles.team_form", fake_team_form)
+    ctx = build_context({**_edge(), "team": "France", "game": "Tunisia @ France"})
+    prompt = format_prompt(ctx)
+    assert "2.0 SOT/game" in prompt
+    assert "rank 2/32" in prompt
+    assert "elite" in prompt
+
+
 def test_build_context_resolves_opponent_and_matchup():
     ctx = build_context({**_edge(), "game": "Tunisia @ France"})
     assert ctx["opponent"] == "Tunisia"
@@ -106,6 +128,24 @@ def test_extract_clamps_and_normalizes():
     assert rec["confidence"] == 100        # clamped
     assert rec["key_factors"] == ["single"]  # string coerced to list
     assert rec["agrees_with_engine"] is False  # missing -> default
+    assert rec["malformed"] is True        # "maybe" isn't a valid pick
+
+
+def test_extract_marks_missing_pick_as_malformed():
+    # Valid JSON, but no usable 'pick' — the gate must treat this as
+    # AI-unavailable, not as a genuine PASS disagreement.
+    rec = extract_recommendation('{"confidence": 80, "reasoning": "no pick field"}')
+    assert rec["pick"] == "PASS"
+    assert rec["malformed"] is True
+
+
+def test_extract_genuine_pass_is_not_malformed():
+    rec = extract_recommendation(
+        '{"pick":"PASS","confidence":40,"agrees_with_engine":false,'
+        '"reasoning":"thin edge","key_factors":[]}'
+    )
+    assert rec["pick"] == "PASS"
+    assert rec["malformed"] is False
 
 
 def test_extract_raises_on_no_json():

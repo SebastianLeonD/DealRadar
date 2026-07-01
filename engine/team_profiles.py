@@ -111,4 +111,5 @@ def team_form(team: str | None, opponent: str | None, profiles: list[dict] | Non
         form["opponent_defense"] = _defense_line(opp, rank)
         form["opponent_games"] = opp["games"]
         form["opponent_defense_rank"] = rank
+        form["opponent_sot_against"] = opp["per_game"].get("shots_on_target_against")
     return form

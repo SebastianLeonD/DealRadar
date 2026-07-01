@@ -287,11 +287,17 @@ def format_prompt(ctx: dict) -> str:
         if form.get("opponent_defense"):
             lines.append(f"  {ctx.get('opponent')} defense "
                          f"({form.get('opponent_games')}g): {form['opponent_defense']}")
-        if form.get("opponent_defense_rank"):
+        rank = form.get("opponent_defense_rank")
+        if rank:
+            pos, total = rank
+            tier = "elite" if pos <= 8 else "leaky" if pos > total - 8 else "mid-table"
+            sot = form.get("opponent_sot_against")
+            sot_note = f"concedes {sot:.1f} SOT/game, " if sot is not None else ""
             lines.append(
-                "  Weigh the matchup explicitly: a shooter facing a top-8 defense "
-                "needs a discount; facing a bottom-8 defense supports the over. "
-                "Flag picks that ignore an extreme matchup."
+                f"  Weigh the matchup explicitly: {ctx.get('opponent')} {sot_note}"
+                f"rank {pos}/{total} in tournament ({tier}). A shooter facing a "
+                "top-8 defense needs a discount; facing a bottom-8 defense "
+                "supports the over. Flag picks that ignore an extreme matchup."
             )
 
     model_p_side = ctx.get("model_p_side")
@@ -379,8 +385,15 @@ def _signed(value):
 def extract_recommendation(text: str) -> dict:
     """Parse the JSON verdict out of model text (tolerates fences/prose)."""
     payload = _first_json_object(text)
-    pick = str(payload.get("pick", "PASS")).upper()
-    if pick not in ("OVER", "UNDER", "PASS"):
+    raw_pick = payload.get("pick")
+    # A JSON object that parsed fine but doesn't carry a valid pick (missing,
+    # or garbage like "maybe") is malformed output, not a genuine PASS call —
+    # the gate must treat it as AI-unavailable rather than as an explicit
+    # disagreement (council finding: malformed JSON was silently downgrading
+    # YES verdicts).
+    pick = str(raw_pick).upper() if raw_pick is not None else None
+    malformed = pick not in ("OVER", "UNDER", "PASS")
+    if malformed:
         pick = "PASS"
     factors = payload.get("key_factors") or []
     if isinstance(factors, str):
@@ -399,6 +412,7 @@ def extract_recommendation(text: str) -> dict:
         "agrees_with_engine": bool(payload.get("agrees_with_engine", False)),
         "reasoning": str(payload.get("reasoning", "")).strip(),
         "key_factors": [str(f).strip() for f in factors if str(f).strip()],
+        "malformed": malformed,
     }
 
 
@@ -466,7 +480,7 @@ def _analyze_via_sdk(ctx: dict) -> dict:
             "subscription) or set ANTHROPIC_API_KEY for the metered API."
         )
 
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(timeout=120)
     message = client.messages.create(
         model=_sdk_model_for(ctx.get("mode", "full")),
         max_tokens=AI_MAX_TOKENS,

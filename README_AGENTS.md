@@ -243,7 +243,7 @@ verdict at LEAN (or NO); nothing downstream can push it back up to YES.
 |---|---|---|
 | 1. Math | True win prob ≥ 57% | `< 57%` and `≥ 54.25%` → **LEAN**; below 54.25% → **NO** (not logged) |
 | 2. Trap flags | None of the flags below fired | any flag → **LEAN** |
-| 3. Evidence | `consensus_tag == 'identified'` (≥2 **sharp** books at the exact PP line) | single sharp book / soft-book-only / interpolated → **LEAN**, flagged "Only one sharp book at this line — need 2+ to confirm a YES" |
+| 3. Evidence | `consensus_tag == 'identified'` (≥2 **sharp** books at the exact PP line, from a *complete* DK/Odds-API fetch) | single sharp book / soft-book-only / interpolated / partial fetch (budget-truncated or a failed per-game call) → **LEAN**, flagged "Only one sharp book at this line — need 2+ to confirm a YES" |
 | 4. AI matchup check | Claude's second opinion (opponent defense rank in context) agrees or PASSes-through on failure | Claude disagrees/PASSes → **LEAN** with its reasoning attached; Claude unreachable → **YES kept**, flagged "AI check unavailable" |
 
 **Trap flags** (any one downgrades YES → LEAN):

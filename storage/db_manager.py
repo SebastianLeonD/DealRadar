@@ -341,7 +341,18 @@ def ingest_draftkings(
         raise FileNotFoundError(f"Missing sharp-lines staging file: {json_path}")
 
     with json_path.open('r') as file:
-        records = json.load(file)
+        payload = json.load(file)
+
+    # Newer scrapers write {'fetch_complete': bool, 'records': [...]} so an
+    # incomplete fetch (budget truncation / per-game failure) can be threaded
+    # through to the consensus tag; a bare list (legacy files, fixtures) is
+    # always treated as a complete fetch.
+    if isinstance(payload, dict):
+        records = payload.get('records', [])
+        fetch_complete = payload.get('fetch_complete', True)
+    else:
+        records = payload
+        fetch_complete = True
 
     timestamp = captured_at or utc_now()
     count = 0
@@ -349,6 +360,9 @@ def ingest_draftkings(
     init_db(db_path)
     with get_connection(db_path) as connection:
         for record in records:
+            fetch_status = record.get('Fetch_Status', 'ok')
+            if not fetch_complete:
+                fetch_status = 'budget_truncated'
             upsert_prop(
                 connection,
                 player_name=record['Player'],
@@ -366,7 +380,7 @@ def ingest_draftkings(
                 league_id=record.get('League_Id'),
                 sport_key=record.get('Sport_Key'),
                 game_id=record.get('Game_Id'),
-                fetch_status=record.get('Fetch_Status', 'ok'),
+                fetch_status=fetch_status,
                 source='DK',
                 bookmaker=record.get('Bookmaker', 'draftkings'),
                 game=record.get('Game'),
@@ -479,10 +493,15 @@ def get_sharp_ladders(
             continue
         book_entry = ladders.setdefault(row['player_name'], {}).setdefault(
             row['bookmaker'],
-            {'points': [], 'captured_at': row['captured_at'], 'commence_time': row['commence_time']},
+            {
+                'points': [], 'captured_at': row['captured_at'],
+                'commence_time': row['commence_time'], 'fetch_complete': True,
+            },
         )
         book_entry['points'].append((row['line'], row['true_over_prob'] / 100.0))
         book_entry['captured_at'] = max(book_entry['captured_at'], row['captured_at'])
+        if row['fetch_status'] not in (None, 'ok'):
+            book_entry['fetch_complete'] = False
 
     return ladders
 

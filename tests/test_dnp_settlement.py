@@ -8,12 +8,29 @@ from datetime import datetime, timedelta, timezone
 
 import engine.settlement as settlement
 from engine.config import PP_MIN_MINUTES
-from engine.settlement import classify_settlement
+from engine.settlement import _participation_minutes, classify_settlement
 from storage.db_manager import get_connection, get_unsettled_edges, init_db, log_edges
 
 
 def _iso(dt):
     return dt.isoformat()
+
+
+# ---- silent DNP-gate skip must print a warning (missing 'appearances') -----
+def test_missing_participation_stat_prints_warning(capsys):
+    sport = {'espn_participation_stat': 'appearances'}
+    box = {'No Data Player': {'totalShots': 2.0}}  # no 'appearances' key at all
+    minutes = _participation_minutes(sport, box, ['No Data Player'])
+    assert minutes is None
+    captured = capsys.readouterr()
+    assert 'participation data missing for No Data Player' in captured.out
+    assert 'DNP gate skipped' in captured.out
+
+
+def test_sport_without_participation_stat_stays_silent(capsys):
+    minutes = _participation_minutes({'espn_participation_stat': None}, {}, ['X'])
+    assert minutes is None
+    assert capsys.readouterr().out == ''
 
 
 # ---- classify_settlement gates on the real world_cup floor -----------------

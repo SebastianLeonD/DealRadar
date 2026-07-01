@@ -182,3 +182,20 @@ def test_two_sharp_books_identified_reaches_yes():
     assert ev["consensus_tag"] == "identified"
     assert ev["verdict"] == "YES"
     assert ev["flags"] == []
+
+
+def test_incomplete_fetch_demotes_identified_to_degraded():
+    # 2 sharp books at the exact line would normally earn 'identified', but a
+    # budget-truncated / partially-failed DK fetch (fetch_complete=False,
+    # threaded from scrapers/draftkings_api.py through get_sharp_ladders) must
+    # withhold the tag — we can't claim consensus over a slate we didn't
+    # fully fetch, even if the two books we did get happen to agree.
+    pp = {"player_name": "X", "line": 1.5, "stat_type": "player_shots", "team": "FRA"}
+    books = {
+        "fanduel": {**_poisson_book(0.60, line=1.5), "fetch_complete": False},
+        "draftkings": {**_poisson_book(0.60, line=1.5), "fetch_complete": True},
+    }
+    ev = evaluate_player(pp, books, {}, model="poisson")
+    assert ev["consensus_n"] == 2
+    assert ev["consensus_tag"] == "degraded"
+    assert ev["verdict"] == "LEAN"
