@@ -80,6 +80,11 @@ PP_MIN_MINUTES = {"nba": 0.0, "world_cup": 1.0}
 PP_PARTIAL_FLOOR = {"nba": 12.0}
 STALE_SETTLE_MAX_HOURS = 72       # deterministic force-VOID horizon (replayable)
 
+# Evidence-gated verdicts shipped 2026-07-01, but the fix commits landed
+# 20:43-21:02 UTC that day — 20:00:00 leaked ~1h of pre-fix edges into the
+# "post-fix" record. This is the actual cutoff after every fix commit landed.
+POST_FIX_CUTOFF = "2026-07-01T21:05:00"
+
 # --- Credit / robustness (engineering) --------------------------------------
 MAX_CREDITS_PER_SLATE = 500
 # Deterministic truncation order: keep the sharpest books, drop the rest first

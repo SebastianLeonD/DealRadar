@@ -12,6 +12,7 @@ that is actually the sharp books pricing in news PP hasn't reacted to.
 """
 
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -175,6 +176,10 @@ def _drop_dead_books(books: dict[str, dict]) -> dict[str, dict]:
     kept = {}
     for book, entry in books.items():
         commence = _parse_ts(entry.get('commence_time'))
+        # Intentional fail-open: a missing/unparseable commence_time keeps the
+        # book rather than dropping it — we'd rather risk a stale ladder than
+        # silently starve every player of coverage when the odds API omits
+        # commence_time.
         if commence is not None and commence <= now:
             continue
         kept[book] = entry
@@ -400,9 +405,11 @@ def _resolve_kickoff(team: str | None, games: list[dict]) -> tuple[str | None, s
     A team can appear in several games across a tournament, so every match is
     collected first (exact normalized side match preferred over substring),
     then the one most relevant to "now" is picked: the earliest game that is
-    upcoming or in progress (commence_time >= now - 6h), else the latest past
-    game. This stops a stale group-stage fixture's kickoff leaking onto a
-    later game for the same team.
+    upcoming or in progress (commence_time >= now - 2.75h — MATCH_OVER_HOURS's
+    2.5h plus a small buffer, not the old 6h), else the latest past game. This
+    stops a stale group-stage fixture's kickoff leaking onto a later game for
+    the same team. A match with no parseable commence_time at all is not a
+    good enough guess to fall back to matches[0] on — return (None, None).
     """
     if not team:
         return None, None
@@ -427,7 +434,7 @@ def _resolve_kickoff(team: str | None, games: list[dict]) -> tuple[str | None, s
         return None, None
 
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(hours=6)
+    cutoff = now - timedelta(hours=2.75)
 
     upcoming = []
     past = []
@@ -447,7 +454,9 @@ def _resolve_kickoff(team: str | None, games: list[dict]) -> tuple[str | None, s
         past.sort(key=lambda pair: pair[0])
         chosen = past[-1][1]
     else:
-        chosen = matches[0]
+        # Every match had an unparseable commence_time — no basis to guess
+        # which one is "now"; matches[0] here was the original bug.
+        return None, None
 
     return chosen['commence_time'], chosen['game']
 
@@ -531,17 +540,13 @@ def price_model_edges(sport: dict, flagged_bets: list[dict]) -> bool:
     return priced
 
 
-def _apply_ai_gate(bet: dict) -> None:
-    """Best-effort second opinion on a YES verdict (Feature B).
+AI_GATE_TIMEOUT_SECONDS = 90  # shorter than analyze_play's own internal timeout
 
-    Never raises and never blocks the pipeline: any failure (backend
-    unavailable, timeout, parse error) leaves the verdict at YES with a flag
-    saying the check couldn't run. A model PASS, or an explicit disagreement,
-    downgrades the verdict to LEAN.
-    """
-    try:
-        rec = analyze_play(bet)
-    except Exception:
+
+def _apply_ai_gate_result(bet: dict, rec: dict | None) -> None:
+    """Apply an AI gate outcome to a bet in place. rec=None means AI-unavailable
+    (backend down, timeout, parse error) — verdict stays YES with a flag."""
+    if rec is None:
         bet['flags'] = ' | '.join(f for f in [bet.get('flags'), 'AI check unavailable'] if f)
         return
 
@@ -555,6 +560,43 @@ def _apply_ai_gate(bet: dict) -> None:
         bet['flags'] = ' | '.join(
             f for f in [bet.get('flags'), f'AI matchup analysis: {reasoning}'] if f
         )
+
+
+def _apply_ai_gate(bet: dict) -> None:
+    """Best-effort second opinion on a single YES verdict (Feature B).
+
+    Never raises and never blocks the pipeline: any failure (backend
+    unavailable, timeout, parse error) leaves the verdict at YES with a flag
+    saying the check couldn't run. A model PASS, or an explicit disagreement,
+    downgrades the verdict to LEAN.
+    """
+    try:
+        rec = analyze_play(bet)
+    except Exception:
+        rec = None
+    _apply_ai_gate_result(bet, rec)
+
+
+def _apply_ai_gate_batch(bets: list[dict]) -> None:
+    """Run the AI gate for every YES bet concurrently (Feature B latency fix).
+
+    Mirrors api/main.py's build_slip_endpoint: a small thread pool so N slow
+    AI calls run in parallel instead of serially blocking find_edges. Each
+    call gets AI_GATE_TIMEOUT_SECONDS, shorter than analyze_play's own
+    internal subprocess timeout, so one slow/hung call doesn't dominate the
+    batch; on timeout it's treated exactly like any other AI-unavailable
+    failure (YES kept, flagged).
+    """
+    if not bets:
+        return
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {pool.submit(analyze_play, bet): bet for bet in bets}
+        for future, bet in futures.items():
+            try:
+                rec = future.result(timeout=AI_GATE_TIMEOUT_SECONDS)
+            except Exception:
+                rec = None
+            _apply_ai_gate_result(bet, rec)
 
 
 def find_edges(sync_staging: bool = True):
@@ -745,9 +787,10 @@ def find_edges(sync_staging: bool = True):
 
     # AI matchup gate (Feature B): a YES is rare by design, so it earns one
     # more best-effort check before it's logged. LEAN/NO never go through it.
-    for bet in flagged_bets:
-        if bet['verdict'] == 'YES':
-            _apply_ai_gate(bet)
+    # Run concurrently (council fix) — serial per-YES calls were the pipeline's
+    # main latency sink on a slate with several YES plays.
+    yes_bets = [bet for bet in flagged_bets if bet['verdict'] == 'YES']
+    _apply_ai_gate_batch(yes_bets)
 
     logged = log_edges(flagged_bets)
     print(f"Logged {logged} edge(s) to SQLite.\n")

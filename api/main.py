@@ -13,6 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from engine.config import POST_FIX_CUTOFF
 from engine.matcher import find_edges
 from storage.db_manager import DB_PATH, get_record_summary, ingest_staging
 from services.pipeline import (
@@ -408,7 +409,15 @@ def get_prizepicks_board():
 
 @app.get("/api/record")
 def get_record():
-    return get_record_summary()
+    """Lifetime record plus the post-fix record (since POST_FIX_CUTOFF).
+
+    Top-level fields are kept for existing callers (e.g. ClvPage) that read
+    the lifetime numbers directly; "lifetime" and "post_fix" are the new,
+    explicit split the Board page uses.
+    """
+    lifetime = get_record_summary()
+    post_fix = get_record_summary(since=POST_FIX_CUTOFF)
+    return {**lifetime, "lifetime": lifetime, "post_fix": post_fix}
 
 
 class TrackBetRequest(AnalyzeRequest):

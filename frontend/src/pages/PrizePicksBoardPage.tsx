@@ -494,17 +494,25 @@ export function PrizePicksBoardPage() {
           <MetricCard label="Bet-worthy" value={yesCount} hint="verdict: YES" />
           <MetricCard label="Engine picks" value={pricedCount} hint="priced, above break-even" />
           <MetricCard
-            label="Record"
+            label="Record (rebuilt engine, since Jul 1)"
             value={
-              record.settled
-                ? `${record.wins}–${record.losses}${record.pushes ? `–${record.pushes}` : ""}`
+              record.post_fix.settled
+                ? `${record.post_fix.wins}–${record.post_fix.losses}${
+                    record.post_fix.pushes ? `–${record.post_fix.pushes}` : ""
+                  }`
                 : "—"
             }
-            hint="wins–losses–pushes"
+            hint={
+              record.lifetime.settled
+                ? `old engine — known-corrupted history: ${record.lifetime.wins}–${record.lifetime.losses}${
+                    record.lifetime.pushes ? `–${record.lifetime.pushes}` : ""
+                  }`
+                : "wins–losses–pushes"
+            }
           />
           <MetricCard
             label="Hit rate"
-            value={record.hit_rate != null ? `${record.hit_rate}%` : "—"}
+            value={record.post_fix.hit_rate != null ? `${record.post_fix.hit_rate}%` : "—"}
             hint="needs 54.25% to profit"
           />
         </div>

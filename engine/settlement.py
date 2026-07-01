@@ -12,7 +12,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from engine.config import PP_MIN_MINUTES, PP_PARTIAL_FLOOR, STALE_SETTLE_MAX_HOURS
+from engine.config import (
+    POST_FIX_CUTOFF,
+    PP_MIN_MINUTES,
+    PP_PARTIAL_FLOOR,
+    STALE_SETTLE_MAX_HOURS,
+)
 from engine.name_matcher import match_player_name
 from engine.sports import get_sport, sport_for_stat
 from scrapers.results_api import fetch_stats_for_date
@@ -118,6 +123,33 @@ def resolve_actual(row: dict, stats_cache: dict) -> tuple[float | None, str, flo
             minutes = _participation_minutes(sport, box, matched_names)
             return sum(leg_values), 'ok', minutes
     return None, 'missing', None
+
+
+def _box_score_exists_without_match(edge: dict, stats_cache: dict) -> bool:
+    """True when a box score WAS fetched (non-empty) for one of the edge's
+    candidate dates but its player name(s) didn't match anyone in it — as
+    opposed to no box score existing at all for that date. Used by the
+    force-void path to tell "name-match miss" (fixable with an alias) apart
+    from "game never got box-scored" (genuinely stale)."""
+    sport_key = sport_for_stat(edge['stat_type'])
+    if sport_key is None:
+        return False
+    sport = get_sport(sport_key)
+    legs = [name.strip() for name in edge['dk_player_name'].split(' + ')]
+    for date in candidate_dates(edge):
+        cache_key = (sport['espn_path'], date)
+        if cache_key not in stats_cache:
+            stats_cache[cache_key] = fetch_stats_for_date(
+                sport['espn_path'], sport['espn_box_format'], date,
+            )
+        box = stats_cache[cache_key]
+        if not box:
+            continue
+        for leg in legs:
+            matched, _ = match_player_name(leg, list(box.keys()))
+            if matched is None:
+                return True
+    return False
 
 
 def grade(play: str, pp_line: float, actual: float) -> str:
@@ -226,17 +258,29 @@ def settle_edges() -> tuple[int, list[str]]:
     # so a bad match/box-score gap doesn't sit open forever and starve the
     # calibration gate's SCORED pool.
     stale_voided = 0
+    name_match_misses = 0
     for edge in get_unsettled_edges():
         anchor = _parse_ts(edge.get('commence_time')) or _parse_ts(
             edge.get('flagged_at') or edge.get('created_at')
         )
         if anchor and now - anchor > timedelta(hours=STALE_SETTLE_MAX_HOURS):
-            force_void_edge(edge['id'], 'stale_unsettled')
+            if _box_score_exists_without_match(edge, stats_cache):
+                force_void_edge(edge['id'], 'no_name_match')
+                name_match_misses += 1
+                date = candidate_dates(edge)[-1] if candidate_dates(edge) else '?'
+                print(
+                    f"WARNING: possible name-match miss: {edge['pp_player_name']} "
+                    f"not found in {date} box score"
+                )
+            else:
+                force_void_edge(edge['id'], 'stale_unsettled')
             stale_voided += 1
     if stale_voided:
         lines.append(
             f"Force-voided {stale_voided} stale unsettled edge(s) "
-            f"(>{STALE_SETTLE_MAX_HOURS}h)."
+            f"(>{STALE_SETTLE_MAX_HOURS}h)"
+            + (f", {name_match_misses} flagged as possible name-match misses."
+               if name_match_misses else '.')
         )
 
     lines.insert(0, f"Settled {settled} edge(s); {missing} had no box score match.")
@@ -314,7 +358,7 @@ def build_record_report() -> list[str]:
 
     # Evidence-gated verdicts shipped 2026-07-01 — track separately whether
     # the repaired pipeline's own calls actually hit.
-    post_fix = get_record_summary(since='2026-07-01T20:00:00')
+    post_fix = get_record_summary(since=POST_FIX_CUTOFF)
     lines.append('')
     lines.append('Post-fix record (since 2026-07-01):')
     if not post_fix['settled']:

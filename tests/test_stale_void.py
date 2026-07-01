@@ -53,3 +53,38 @@ def test_stale_unsettled_edge_force_voided(tmp_path, monkeypatch):
     recent_row = rows["Recent Player"]
     assert recent_row["result"] is None
     assert recent_row["force_voided_at"] is None
+
+
+def test_stale_edge_with_unmatched_box_score_gets_no_name_match_reason(tmp_path, monkeypatch):
+    """A box score WAS fetched (non-empty) but the player's name never
+    matched anyone in it — that's a name-matcher gap (fixable with an
+    alias), not a genuine 'no data ever showed up' case, so it must not be
+    silently swallowed under 'stale_unsettled'."""
+    db = tmp_path / "namematch.db"
+    init_db(db)
+    monkeypatch.setattr(settlement, "get_unsettled_edges",
+                         functools.partial(get_unsettled_edges, db_path=db))
+    monkeypatch.setattr(settlement, "force_void_edge",
+                         functools.partial(force_void_edge, db_path=db))
+    # Non-empty box score, but no entry for this edge's player at all.
+    monkeypatch.setattr(
+        settlement, "fetch_stats_for_date",
+        lambda *a, **kw: {"Totally Different Player": {"totalShots": 2.0, "appearances": 1.0}},
+    )
+
+    stale_commence = _iso(datetime.now(timezone.utc) - timedelta(hours=STALE_SETTLE_MAX_HOURS + 10))
+    log_edges([
+        {"pp_player_name": "Ghost Player", "dk_player_name": "Ghost Player",
+         "stat_type": "player_shots", "play": "OVER", "pp_line": 1.5,
+         "dk_line_at_flag": 1.5, "edge_type": "x", "commence_time": stale_commence},
+    ], db_path=db)
+
+    settlement.settle_edges()
+
+    with get_connection(db) as conn:
+        row = dict(conn.execute(
+            "SELECT * FROM edges WHERE pp_player_name='Ghost Player'"
+        ).fetchone())
+
+    assert row["result"] == "VOID"
+    assert row["void_reason"] == "no_name_match"

@@ -83,7 +83,13 @@ export interface RecordSummary {
   hit_rate: number | null;
   avg_predicted_prob: number | null;
   by_verdict: Record<string, { wins: number; losses: number; pushes: number; voids: number }>;
+  // Split added alongside the top-level (lifetime) fields above, which are
+  // kept for existing callers (e.g. ClvPage) reading the record directly.
+  lifetime: RecordSummaryCore;
+  post_fix: RecordSummaryCore;
 }
+
+type RecordSummaryCore = Omit<RecordSummary, "lifetime" | "post_fix">;
 
 export interface ClvRow {
   flagged_at: string;
