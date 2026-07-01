@@ -49,6 +49,8 @@ function toEdge(group: PpBoardGroup, prop: PpBoardProp, id: number): Edge {
     model_credibility: e?.model_credibility ?? null,
     consensus_n: e?.consensus_n ?? null,
     consensus_tag: e?.consensus_tag ?? null,
+    best_venue: e?.best_venue ?? null,
+    venue_note: e?.venue_note ?? null,
   } as unknown as Edge;
 }
 
@@ -277,6 +279,15 @@ function PlayerCard({
           {prop.opponent && (
             <p className="mt-0.5 truncate text-[11px] text-ink-faint">
               vs {prop.opponent} {kickoff(prop.start_time)}
+            </p>
+          )}
+          {e?.venue_note && (
+            <p
+              className={`mt-0.5 truncate text-[11px] ${
+                e.verdict === "YES" ? "font-semibold text-bet" : "text-ink-faint"
+              }`}
+            >
+              {e.venue_note}
             </p>
           )}
         </div>

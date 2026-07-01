@@ -142,6 +142,12 @@ EDGES_MIGRATION_COLUMNS = {
     'consensus_tag': 'TEXT',
     'best_book': 'TEXT',                    # cross-book line-shopping anchor (Pillar 3)
     'config_version': 'TEXT',
+    # Venue shopping (Feature A): which app has the softer line for our side.
+    'best_venue': 'TEXT',                   # 'underdog' | 'prizepicks'
+    'venue_note': 'TEXT',
+    # AI matchup gate (Feature B): second-opinion check on YES verdicts only.
+    'ai_pick': 'TEXT',                       # 'OVER' | 'UNDER' | 'PASS'
+    'ai_confidence': 'INTEGER',
     # Phase-2 settlement partition (spec §3.1).
     'settlement_status': 'TEXT',            # NULL|'SCORED'|'PUSH'|'VOID' (NO_DATA=NULL)
     'outcome_over': 'INTEGER',              # 1 over won / 0 over lost / NULL push|void
@@ -527,10 +533,12 @@ def log_edges(
                     line_band, snapshot_bucket, flagged_at,
                     pp_captured_at, dk_captured_at,
                     model_p, model_p_side, model_lambda, model_credibility,
-                    model_n_matches, model_source
+                    model_n_matches, model_source,
+                    best_venue, venue_note, ai_pick, ai_confidence
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                          ?, ?, ?, ?, ?, ?)
+                          ?, ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?)
                 """,
                 (
                     edge['pp_player_name'],
@@ -574,6 +582,10 @@ def log_edges(
                     edge.get('model_credibility'),
                     edge.get('model_n_matches'),
                     edge.get('model_source'),
+                    edge.get('best_venue'),
+                    edge.get('venue_note'),
+                    edge.get('ai_pick'),
+                    edge.get('ai_confidence'),
                 ),
             )
         connection.commit()

@@ -1,6 +1,6 @@
 """Tests for team-form context (resolution + name aliasing)."""
 
-from engine.team_profiles import team_form
+from engine.team_profiles import defense_rank, team_form
 
 PROFILES = [
     {
@@ -56,3 +56,26 @@ def test_unknown_team_yields_no_form():
 
 def test_empty_profiles_is_safe():
     assert team_form("Brazil", "USA", []) == {}
+
+
+def test_defense_rank_orders_by_fewest_shots_conceded():
+    profiles = PROFILES + [
+        {
+            "team": "Spain",
+            "normalized": "spain",
+            "games": 1,
+            "clean_sheets": 1,
+            "per_game": {**PROFILES[0]["per_game"], "shots_on_target_against": 1.0},
+        }
+    ]
+    ranks = defense_rank(profiles)
+    # Spain concedes the fewest (1.0) -> rank 1; Brazil the most (3.0) -> rank 3.
+    assert ranks["spain"] == (1, 3)
+    assert ranks["united states"] == (2, 3)
+    assert ranks["brazil"] == (3, 3)
+
+
+def test_opponent_defense_line_includes_rank():
+    form = team_form("Brazil", "United States", PROFILES)
+    assert "rank 1/2" in form["opponent_defense"]
+    assert form["opponent_defense_rank"] == (1, 2)

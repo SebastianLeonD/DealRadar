@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from engine.ai_analyst import analyze_play
 from engine.calibration import line_band as calc_line_band
 from engine.calibration import select_sharpest_book
 from engine.consensus import line_matched_consensus
@@ -67,6 +68,26 @@ def _split_books(book_probs: dict[str, float]) -> tuple[dict, dict]:
     sharp = {b: p for b, p in book_probs.items() if b not in SOFT_BOOKS}
     soft = {b: p for b, p in book_probs.items() if b in SOFT_BOOKS}
     return sharp, soft
+
+
+def _venue_comparison(play: str, pp_line: float, books: dict[str, dict]) -> tuple[str, str]:
+    """Compare PP's line vs Underdog's for the same prop/side (Feature A).
+
+    OVER: the lower line is softer. UNDER: the higher line is softer. Falls
+    back to 'prizepicks' when Underdog doesn't quote this prop.
+    """
+    ud = books.get('underdog')
+    if not ud or not ud.get('points'):
+        return 'prizepicks', 'Only on PrizePicks'
+
+    ud_line = min(ud['points'], key=lambda pt: abs(pt[0] - pp_line))[0]
+    if ud_line == pp_line:
+        return 'prizepicks', 'Same line both apps'
+
+    underdog_softer = (ud_line < pp_line) if play == 'OVER' else (ud_line > pp_line)
+    if underdog_softer:
+        return 'underdog', f'Underdog line {ud_line} is softer than PP {pp_line} for the {play}'
+    return 'prizepicks', f'PrizePicks line {pp_line} is softer than Underdog {ud_line} for the {play}'
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -259,6 +280,8 @@ def evaluate_player(
         verdict = 'LEAN'
         flags = flags + ['Only one sharp book at this line — need 2+ to confirm a YES']
 
+    best_venue, venue_note = _venue_comparison(play, pp_line, books)
+
     return {
         'play': play,
         'win_prob': round(win_prob, 4),
@@ -270,6 +293,8 @@ def evaluate_player(
         'consensus_n': cons['consensus_n'],
         'consensus_tag': cons['consensus_tag'],
         'best_book': best_book,
+        'best_venue': best_venue,
+        'venue_note': venue_note,
         # Phase-2 canonical-event fields persisted at flag time.
         'consensus_p': round(consensus_over, 4),     # un-folded P(over)
         'win_prob_raw': round(win_prob, 4),          # asserted shape P(side)
@@ -506,6 +531,32 @@ def price_model_edges(sport: dict, flagged_bets: list[dict]) -> bool:
     return priced
 
 
+def _apply_ai_gate(bet: dict) -> None:
+    """Best-effort second opinion on a YES verdict (Feature B).
+
+    Never raises and never blocks the pipeline: any failure (backend
+    unavailable, timeout, parse error) leaves the verdict at YES with a flag
+    saying the check couldn't run. A model PASS, or an explicit disagreement,
+    downgrades the verdict to LEAN.
+    """
+    try:
+        rec = analyze_play(bet)
+    except Exception:
+        bet['flags'] = ' | '.join(f for f in [bet.get('flags'), 'AI check unavailable'] if f)
+        return
+
+    bet['ai_pick'] = rec.get('pick')
+    bet['ai_confidence'] = rec.get('confidence')
+
+    disagrees = rec.get('pick') == 'PASS' or rec.get('agrees_with_engine') is False
+    if disagrees:
+        bet['verdict'] = 'LEAN'
+        reasoning = (rec.get('reasoning') or '')[:120]
+        bet['flags'] = ' | '.join(
+            f for f in [bet.get('flags'), f'AI matchup analysis: {reasoning}'] if f
+        )
+
+
 def find_edges(sync_staging: bool = True):
     if sync_staging:
         try:
@@ -642,6 +693,8 @@ def find_edges(sync_staging: bool = True):
                 'consensus_n': evaluation.get('consensus_n'),
                 'consensus_tag': evaluation.get('consensus_tag'),
                 'best_book': evaluation.get('best_book'),
+                'best_venue': evaluation.get('best_venue'),
+                'venue_note': evaluation.get('venue_note'),
                 # Phase-2 canonical-event triple + cluster/stratum keys.
                 'consensus_p': evaluation.get('consensus_p'),
                 'win_prob_raw': evaluation.get('win_prob_raw'),
@@ -689,6 +742,12 @@ def find_edges(sync_staging: bool = True):
         return []
 
     flagged_bets.sort(key=lambda bet: bet['win_prob'], reverse=True)
+
+    # AI matchup gate (Feature B): a YES is rare by design, so it earns one
+    # more best-effort check before it's logged. LEAN/NO never go through it.
+    for bet in flagged_bets:
+        if bet['verdict'] == 'YES':
+            _apply_ai_gate(bet)
 
     logged = log_edges(flagged_bets)
     print(f"Logged {logged} edge(s) to SQLite.\n")

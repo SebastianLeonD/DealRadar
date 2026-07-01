@@ -201,6 +201,8 @@ def build_context(edge: dict, mode: str = "full") -> dict:
         "stat_type": _stat_label(edge.get("stat_type")),
         "prizepicks_line": pp_line,
         "underdog_line": _num(edge.get("ud_line")),
+        "best_venue": edge.get("best_venue"),
+        "venue_note": edge.get("venue_note"),
         "engine_favoured_side": edge.get("play"),
         "engine_verdict": edge.get("verdict"),
         "win_probability": win_prob,
@@ -244,6 +246,10 @@ def format_prompt(ctx: dict) -> str:
     if two_books:
         lines.append(f"Underdog line: {ud_line}  (different from PrizePicks — call each one)")
 
+    venue_note = ctx.get("venue_note")
+    if venue_note:
+        lines.append(f"Venue: {venue_note}")
+
     if stats_only:
         pf = ctx.get("player_form")
         lines.append("")
@@ -281,6 +287,12 @@ def format_prompt(ctx: dict) -> str:
         if form.get("opponent_defense"):
             lines.append(f"  {ctx.get('opponent')} defense "
                          f"({form.get('opponent_games')}g): {form['opponent_defense']}")
+        if form.get("opponent_defense_rank"):
+            lines.append(
+                "  Weigh the matchup explicitly: a shooter facing a top-8 defense "
+                "needs a discount; facing a bottom-8 defense supports the over. "
+                "Flag picks that ignore an extreme matchup."
+            )
 
     model_p_side = ctx.get("model_p_side")
     if model_p_side is not None:

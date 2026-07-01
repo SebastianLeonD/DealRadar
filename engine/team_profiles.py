@@ -54,11 +54,32 @@ def _attack_line(p: dict) -> str:
             f"{g['goals']}/g scored")
 
 
-def _defense_line(p: dict) -> str:
+def defense_rank(profiles: list[dict]) -> dict[str, tuple[int, int]]:
+    """Rank each team's defense by shots-on-target conceded per game (fewest
+    first). Returns {normalized_team: (rank, total_teams)}; rank 1 = the
+    stingiest (elite) defense in the field."""
+    ranked = sorted(
+        profiles, key=lambda p: p["per_game"].get("shots_on_target_against", float("inf"))
+    )
+    total = len(ranked)
+    return {p["normalized"]: (i + 1, total) for i, p in enumerate(ranked)}
+
+
+def _defense_line(p: dict, rank: tuple[int, int] | None = None) -> str:
     g = p["per_game"]
     cs = f", {p['clean_sheets']} clean sheet(s)" if p.get("clean_sheets") else ""
+    rank_note = ""
+    if rank:
+        pos, total = rank
+        if pos <= 8:
+            tag = " — elite defense"
+        elif pos > total - 8:
+            tag = " — leaky defense"
+        else:
+            tag = ""
+        rank_note = f" (rank {pos}/{total}{tag})"
     return (f"{g['goals_allowed']}/g conceded, {g['shots_on_target_against']}/g "
-            f"on target faced{cs}")
+            f"on target faced{rank_note}{cs}")
 
 
 def _style_line(p: dict) -> str:
@@ -86,6 +107,8 @@ def team_form(team: str | None, opponent: str | None, profiles: list[dict] | Non
         form["team_style"] = _style_line(own)
         form["team_games"] = own["games"]
     if opp:
-        form["opponent_defense"] = _defense_line(opp)
+        rank = defense_rank(profiles).get(opp["normalized"])
+        form["opponent_defense"] = _defense_line(opp, rank)
         form["opponent_games"] = opp["games"]
+        form["opponent_defense_rank"] = rank
     return form

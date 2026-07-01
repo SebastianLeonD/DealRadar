@@ -175,6 +175,8 @@ class AnalyzeRequest(BaseModel):
     model_credibility: float | None = None
     consensus_n: int | None = None
     consensus_tag: str | None = None
+    best_venue: str | None = None
+    venue_note: str | None = None
     mode: str = "full"  # "full" (with sharp books) or "stats_only" (PrizePicks-only)
 
 
@@ -362,6 +364,8 @@ def get_prizepicks_board():
                 "model_credibility": edge.get("model_credibility"),
                 "consensus_n": edge.get("consensus_n"),
                 "consensus_tag": edge.get("consensus_tag"),
+                "best_venue": edge.get("best_venue"),
+                "venue_note": edge.get("venue_note"),
             }
         g["props"].append(
             {

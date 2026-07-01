@@ -57,6 +57,10 @@ export interface Edge {
   model_credibility?: number | null;
   consensus_n?: number | null;
   consensus_tag?: "identified" | "single_book" | "degraded" | string | null;
+  best_venue?: "underdog" | "prizepicks" | null;
+  venue_note?: string | null;
+  ai_pick?: "OVER" | "UNDER" | "PASS" | null;
+  ai_confidence?: number | null;
 }
 
 export interface EdgesResponse {
@@ -169,6 +173,8 @@ export interface PpEngine {
   model_credibility?: number | null;
   consensus_n?: number | null;
   consensus_tag?: "identified" | "single_book" | "degraded" | string | null;
+  best_venue?: "underdog" | "prizepicks" | null;
+  venue_note?: string | null;
 }
 
 export interface PpBoardProp {

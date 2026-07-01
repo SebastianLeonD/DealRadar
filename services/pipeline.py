@@ -232,7 +232,11 @@ def load_edges_dataframe(
             model_p_side,
             model_credibility,
             consensus_n,
-            consensus_tag
+            consensus_tag,
+            best_venue,
+            venue_note,
+            ai_pick,
+            ai_confidence
         FROM edges
         WHERE 1 = 1
     """
