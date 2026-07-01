@@ -311,6 +311,23 @@ def build_record_report() -> list[str]:
         lines.append(
             f"  {verdict.ljust(8)}: {bucket['wins']}W - {bucket['losses']}L - {bucket['pushes']}P"
         )
+
+    # Evidence-gated verdicts shipped 2026-07-01 — track separately whether
+    # the repaired pipeline's own calls actually hit.
+    post_fix = get_record_summary(since='2026-07-01T20:00:00')
+    lines.append('')
+    lines.append('Post-fix record (since 2026-07-01):')
+    if not post_fix['settled']:
+        lines.append('  Nothing settled yet.')
+    else:
+        lines.append(
+            f"  Overall: {post_fix['wins']}W - {post_fix['losses']}L - {post_fix['pushes']}P"
+            + (f"  ({post_fix['hit_rate']}% hit rate)" if post_fix['hit_rate'] is not None else '')
+        )
+        for verdict, bucket in sorted(post_fix['by_verdict'].items()):
+            lines.append(
+                f"  {verdict.ljust(8)}: {bucket['wins']}W - {bucket['losses']}L - {bucket['pushes']}P"
+            )
     return lines
 
 

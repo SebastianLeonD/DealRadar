@@ -251,6 +251,14 @@ def evaluate_player(
         flags = [SOFT_ONLY_FLAG] + flags
     verdict = assign_verdict(win_prob, flags)
 
+    # A YES must be earned by evidence, not just a high number (council
+    # ratified): one sharp book at this exact line is a pricing artifact, not
+    # a confirmed edge. Only >=2 sharp books quoting the exact PP line
+    # ('identified') may back a YES; everything else caps at LEAN.
+    if verdict == 'YES' and cons['consensus_tag'] != 'identified':
+        verdict = 'LEAN'
+        flags = flags + ['Only one sharp book at this line — need 2+ to confirm a YES']
+
     return {
         'play': play,
         'win_prob': round(win_prob, 4),

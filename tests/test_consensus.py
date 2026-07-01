@@ -157,3 +157,28 @@ def test_two_sharp_books_at_same_line_is_identified():
     }
     ev = evaluate_player(pp, books, {}, model="poisson")
     assert ev["consensus_tag"] == "identified"
+
+
+# --- evidence-gated verdicts (council-ratified: one sharp book is a pricing
+# artifact, not a confirmed edge; YES requires >=2 sharp books at the exact
+# PP line, i.e. consensus_tag == 'identified') ---
+
+def test_single_sharp_book_high_prob_capped_at_lean():
+    pp = {"player_name": "X", "line": 1.5, "stat_type": "player_shots", "team": "FRA"}
+    books = {"draftkings": _poisson_book(0.71, line=1.5)}
+    ev = evaluate_player(pp, books, {}, model="poisson")
+    assert ev["consensus_tag"] == "single_book"
+    assert ev["verdict"] == "LEAN"
+    assert any("2+ to confirm a YES" in flag for flag in ev["flags"])
+
+
+def test_two_sharp_books_identified_reaches_yes():
+    pp = {"player_name": "X", "line": 1.5, "stat_type": "player_shots", "team": "FRA"}
+    books = {
+        "fanduel": _poisson_book(0.60, line=1.5),
+        "draftkings": _poisson_book(0.60, line=1.5),
+    }
+    ev = evaluate_player(pp, books, {}, model="poisson")
+    assert ev["consensus_tag"] == "identified"
+    assert ev["verdict"] == "YES"
+    assert ev["flags"] == []

@@ -666,23 +666,32 @@ def force_void_edge(edge_id: int, void_reason: str, db_path: Path = DB_PATH) -> 
         connection.commit()
 
 
-def get_record_summary(db_path: Path = DB_PATH) -> dict:
+def get_record_summary(db_path: Path = DB_PATH, since: str | None = None) -> dict:
     """Win/loss record of settled edges, overall and by verdict.
 
     Counts unique plays, not log rows — historical matcher runs logged the
     same play repeatedly, which silently inflated the record.
+
+    since: optional ISO flagged_at floor (e.g. a pipeline-fix timestamp) so
+    the repaired verdicts' trustworthiness can be measured on their own.
     """
     init_db(db_path)
 
+    query = """
+        SELECT verdict, result, win_prob
+        FROM edges
+        WHERE result IS NOT NULL
+    """
+    params: tuple = ()
+    if since:
+        query += " AND flagged_at >= ?"
+        params = (since,)
+    query += """
+        GROUP BY pp_player_name, stat_type, play, pp_line, result, actual_value
+    """
+
     with get_connection(db_path) as connection:
-        rows = connection.execute(
-            """
-            SELECT verdict, result, win_prob
-            FROM edges
-            WHERE result IS NOT NULL
-            GROUP BY pp_player_name, stat_type, play, pp_line, result, actual_value
-            """
-        ).fetchall()
+        rows = connection.execute(query, params).fetchall()
 
     summary = {
         'settled': len(rows),
