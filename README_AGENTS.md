@@ -1,6 +1,6 @@
 # Sports Arbitrage & +EV Matching Engine (NBA + FIFA World Cup 2026)
-**Target Platform:** PrizePicks vs. Sharp Market Consensus (DK / FD / MGM / Caesars)
-**Last Updated:** June 2026
+**Target Platform:** PrizePicks vs. Sharp Market Consensus (DK / FD / MGM / Caesars) + Underdog (line shopping only)
+**Last Updated:** July 2026
 
 ## Multi-Sport: Switching Between NBA and the World Cup
 
@@ -101,12 +101,26 @@ How it gets there:
    probability instead of a vague "line value" flag.
 4. **Trap detection.** Stale PP boards, big line gaps (breaking news), book
    disagreement, and ESPN injury status downgrade a play to LEAN.
-5. **Verdicts.** True win prob ≥ 57% with no flags → **YES**. Above the 54.25%
-   flex break-even → **LEAN**. Below → **NO** (not logged).
-6. **Slip suggestions.** YES plays are combined into power/flex structures and
+5. **Verdicts (the gauntlet).** True win prob ≥ 57% **and** the play is
+   `consensus_tag == 'identified'` (≥2 SHARP books quoting the exact PP
+   line — soft books and PP itself never count) **and** no trap flags → math
+   says **YES**. Above the 54.25% flex break-even → **LEAN**. Below → **NO**
+   (not logged). A single sharp book at the exact line caps at LEAN with a
+   visible reason, even at a high win prob.
+6. **AI matchup gate (YES only).** Every play that still reads YES after step
+   5 auto-runs the AI analyst once more, this time fed the opponent's defense
+   rank (FBref shots-on-target conceded). If Claude disagrees or PASSes, the
+   verdict downgrades to LEAN with the reasoning attached; if the check itself
+   fails (CLI down, timeout), the YES is kept and flagged "AI check
+   unavailable" — the gate can only downgrade, never block on infra failure.
+7. **Best-venue line shopping.** Every edge also stamps `best_venue` /
+   `venue_note` — PP vs. Underdog, whichever has the softer line for our side
+   — shown on the board so you know where to place it.
+8. **Slip suggestions.** YES plays are combined into power/flex structures and
    ranked by exact EV.
-7. **Settlement.** ESPN box scores grade every logged edge WIN/LOSS/PUSH, so
-   the dashboard shows your real record and the model's calibration gap.
+9. **Settlement.** ESPN box scores grade every logged edge WIN/LOSS/PUSH/VOID
+   (see "Settlement Integrity" below), so the dashboard shows your real
+   record and the model's calibration gap.
 
 Plus the original **CLV tracking** against DraftKings closing lines.
 
@@ -220,13 +234,17 @@ Open **http://localhost:5173**
 
 ---
 
-## Verdict Rules
+## Verdict Rules (the gauntlet)
 
-| Condition | Verdict |
-|---|---|
-| True win prob ≥ 57% and no trap flags | **YES** |
-| Above 54.25% break-even (or strong but flagged) | **LEAN** |
-| Below 54.25% break-even | **NO** (not logged) |
+A **YES** must clear every gate below, in order. Failing any one caps the
+verdict at LEAN (or NO); nothing downstream can push it back up to YES.
+
+| Gate | Condition | On fail |
+|---|---|---|
+| 1. Math | True win prob ≥ 57% | `< 57%` and `≥ 54.25%` → **LEAN**; below 54.25% → **NO** (not logged) |
+| 2. Trap flags | None of the flags below fired | any flag → **LEAN** |
+| 3. Evidence | `consensus_tag == 'identified'` (≥2 **sharp** books at the exact PP line) | single sharp book / soft-book-only / interpolated → **LEAN**, flagged "Only one sharp book at this line — need 2+ to confirm a YES" |
+| 4. AI matchup check | Claude's second opinion (opponent defense rank in context) agrees or PASSes-through on failure | Claude disagrees/PASSes → **LEAN** with its reasoning attached; Claude unreachable → **YES kept**, flagged "AI check unavailable" |
 
 **Trap flags** (any one downgrades YES → LEAN):
 
@@ -238,6 +256,60 @@ Open **http://localhost:5173**
 **54.25%** is the per-pick break-even for PrizePicks 5/6 flex slips. Slip EV
 uses the payout tables in `engine/probability.py` — verify them in-app
 occasionally; PrizePicks adjusts multipliers.
+
+**"Identified" consensus** (gate 3) means ≥2 **sharp** books (any book not in
+`SOFT_BOOKS`, currently just Underdog, and never PrizePicks itself) quote the
+exact PP line — a soft-book-only or single-sharp-book play can look like a
+great number and still never reach YES. This exists because one book's price
+at an exact line is a pricing artifact, not a confirmed edge
+(`engine/matcher.py:evaluate_player`).
+
+**Trust policy:** treat every YES as the strongest signal the pipeline can
+currently produce, sized small — not as a proven-profitable system. The
+lifetime record (pre-fix) was corrupted by the bugs below, so it's tracked
+separately from the **post-fix record** (since 2026-07-01, printed by
+`engine/settlement.py`). Don't scale stake size up until the post-fix YES
+bucket shows a hit rate materially above ~57% over 30+ settled picks — with
+current volume that's a real number, not a guess.
+
+---
+
+## Settlement Integrity
+
+Three bugs let bad grades into the record before 2026-07-01; all are fixed
+and covered by tests, and a retro audit script exists for the DNP one:
+
+- **Right-game kickoff resolution.** `engine/matcher.py:_resolve_kickoff`
+  used to return the first game whose team-name substring matched — for a
+  team that plays multiple tournament matches, that could resolve to a
+  weeks-old fixture. It now collects every match, prefers the game closest to
+  "now" (upcoming/in-progress over past), and only falls back to the latest
+  past game if nothing is upcoming.
+- **Force-void after 72h unsettled.** `STALE_SETTLE_MAX_HOURS = 72`
+  (`engine/config.py`) existed but was never enforced. `settle_edges()` now
+  force-voids (`storage/db_manager.py:force_void_edge`) any edge still
+  unsettled 72h past its kickoff/flag anchor, so a box-score/name-match gap
+  can't leave a play open (and out of the calibration pool) forever.
+- **DNP participation gate.** ESPN's soccer box score exposes a binary
+  `appearances` stat (1.0 = played at all, 0.0 = benched), mapped to a
+  synthetic 0/90 "minutes" figure. `PP_MIN_MINUTES['world_cup'] = 1.0`
+  (`engine/config.py`) means a benched player VOIDs instead of settling as an
+  UNDER win. `python3 scripts/audit_dnp.py --dry-run` (then without the flag)
+  retroactively re-grades already-settled rows against this gate — it's
+  idempotent (a row is only touched while `pre_audit_result IS NULL`, and the
+  pre-audit result is preserved once it fires), so re-running it after new
+  settlements is safe.
+
+**Pricing honesty**, same batch:
+
+- **Dead ladders excluded.** `_drop_dead_books` drops any book's ladder whose
+  game has already kicked off before pricing/consensus runs, so a finished
+  match's stale-but-internally-consistent lines can't sneak into a new edge.
+- **Quote staleness window.** `_drop_stale_books` drops a book if its
+  `captured_at` is more than `STALE_MAX_MINUTES` (`engine/config.py`, = 15)
+  older than the newest book for that player — relative freshness between
+  books, not wall-clock age, so a normal "run the matcher an hour later"
+  workflow isn't penalized.
 
 ---
 
@@ -267,8 +339,17 @@ book's full alternate ladder is preserved. `commence_time` stores game start.
 ### `edges` — every flagged play
 
 New columns: `win_prob`, `ev_percent`, `verdict`, `flags`, `book_count`,
-`commence_time`, plus settlement fields `result` (WIN/LOSS/PUSH),
-`actual_value`, `settled_at`.
+`commence_time`, plus settlement fields `result` (WIN/LOSS/PUSH/VOID),
+`actual_value`, `settled_at`, `settlement_status`, `void_reason`,
+`force_voided_at`, `pre_audit_result` (retro DNP audit bookkeeping).
+
+Also carries the shadow FBref Poisson model (`model_p`, `model_p_side`,
+`model_credibility`, `model_n_matches`, `model_source` — logged alongside the
+market number, never used to flag a verdict), the line-matched consensus
+(`consensus_n`, `consensus_tag`), and line-shopping (`best_book`,
+`best_venue`, `venue_note`, `ai_pick`, `ai_confidence` from the AI matchup
+gate). All of these are surfaced in the UI and passed into the AI analyst's
+context.
 
 ---
 
@@ -283,6 +364,8 @@ New columns: `win_prob`, `ev_percent`, `verdict`, `flags`, `book_count`,
 | `python3 engine/clv_report.py` | CLV report from logged edges | None |
 | `python3 scrapers/injuries_api.py` | Refresh injury cache manually | None |
 | `python3 scrapers/results_api.py 20260611` | Inspect box scores for a date | None |
+| `python3 scripts/audit_dnp.py --dry-run` | Report already-settled rows a DNP participation gate would VOID (retro; idempotent) | None |
+| `python3 scripts/audit_dnp.py` | Apply that re-grade | None |
 | `./scripts/dev.sh` | Launch React dashboard + API | None |
 
 ---
@@ -303,8 +386,15 @@ anchored to DraftKings only (not the consensus) for consistency.
 - **Always run from the project root** — scripts use relative paths.
 - **Old PP boards linger** in the database. If a player shows a stale-board
   flag, that PP line came from an earlier paste — re-paste the current board.
-- **Settlement waits 4 hours** after game start (or flag time) before grading.
+- **Settlement waits 4 hours** after game start (or flag time) before grading,
+  and force-VOIDs anything still unsettled 72h later (`STALE_SETTLE_MAX_HOURS`).
 - All files under `data/` are gitignored.
+- **Pipeline endpoints are serialized** — `api/main.py` holds a single lock so
+  two pipeline actions (fetch/parse/matcher/settle/full) can't run at once and
+  clobber the same JSON/SQLite state; a second call while one is running gets
+  an "already running" error instead of queuing silently. Subprocess calls
+  time out at 900s, JSON writes are atomic, and timestamp parsing is tz-safe
+  (naive timestamps are treated as UTC) throughout the pipeline.
 
 ---
 
@@ -337,11 +427,18 @@ anchored to DraftKings only (not the consensus) for consistency.
 
 ## Engineering Backlog (the funnel plan)
 
-1. **Trust gates** — per-bucket (stat × verdict × edge type) settled ROI must be
-   positive before that bucket can produce YES; auto-calibration correction from record
-2. **AI deep-analysis stage** — for plays surviving the math gates: lineup intel,
-   news sweep, motivation context (dead rubbers!) → confirm/downgrade/kill dossier
-3. **Demon/goblin payout tables** — encode from the app UI to make them tradeable
+1. **Trust gates** — ✅ *evidence gate shipped 2026-07-01*: YES now requires
+   `consensus_tag='identified'` (≥2 sharp books), not just a high win prob.
+   Still open: per-bucket (stat × verdict × edge type) settled ROI must be
+   positive before that bucket can produce YES; auto-calibration correction
+   from the post-fix record.
+2. **AI deep-analysis stage** — ✅ *first slice shipped 2026-07-01*: every YES
+   auto-runs one AI matchup check (opponent defense rank) before logging.
+   Still open: lineup intel, news sweep, motivation context (dead rubbers!) →
+   a fuller confirm/downgrade/kill dossier beyond the single matchup check.
+3. **Demon/goblin payout tables** — dropped: PP's API exposes no payout
+   multipliers for these, so goblin/demon EV is currently impossible to
+   compute (see "Supported Betting Types" below).
 4. **Correlation-aware slips** — same-game legs currently only flagged, not modeled
 5. **Pre-game closing snapshot** — auto-tag last scrape before `commence_time` as true close
 6. **Calibration curve UI** — predicted win % vs actual hit rate on the dashboard
@@ -351,9 +448,13 @@ anchored to DraftKings only (not the consensus) for consistency.
 
 ## AI Analyst (ships backlog #2)
 
-On the Opportunities page, the plays the engine likes (**YES / MAYBE**) are
-surfaced as cards and every row has an **Ask Claude** button — nothing calls the
-model until you click, so you choose which plays to spend a call on. Claude gets
+Every play that reaches YES through the math + evidence gates auto-runs
+through the AI analyst once as the **AI matchup gate** (see Verdict Rules
+above) before it's logged — that call is automatic and not optional. Beyond
+that gate, the Opportunities page also surfaces plays (**YES / LEAN**) as
+cards with an **Ask Claude** button for manual, on-demand second opinions —
+nothing calls the model there until you click, so you choose which additional
+plays to spend a call on. Claude gets
 the play's full context — the sharp-consensus win probability, EV over
 break-even, the anchor line vs the PrizePicks line, book count, every trap flag,
 **and the matchup (the opponent, derived from the sharp board's game string)** —

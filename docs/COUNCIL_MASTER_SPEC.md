@@ -186,3 +186,26 @@ _Rationale:_ Calibration MEASURES and GATES. The asserted shape, the sigma form/
 - Ship second sport (NCAAB/NHL/soccer) once its (sport,canonical_stat) join, roster source, market_type, and availability predicate pass; soccer uses the two-feed lineup/settlement seam
 
 _Rationale:_ Everything asserted (calibration map, sharpness weights, Kelly, second sport) ships last, each behind its own OOS proof. The map, weights, and Kelly must each beat their identified null/flat-stake baseline; a second sport activates only when its seam invariants and per-regime calibration pass, so expansion is earned, not assumed.
+
+---
+
+## Addendum — 2026-07-01: settlement integrity + evidence-gated YES
+
+Three implementation gaps in the settlement/pricing path (not spec changes —
+bugs against this document's own invariants) were fixed and are now covered
+by tests: kickoff resolution could match a stale fixture for a multi-match
+team (`engine/matcher.py:_resolve_kickoff`), the `STALE_SETTLE_MAX_HOURS`
+force-void was specified but never enforced, and a DNP/benched player settled
+as a graded UNDER win instead of VOID (no participation gate existed). A
+retro audit script (`scripts/audit_dnp.py`) re-grades rows settled before the
+participation gate landed.
+
+Also, this document's OBJ-1/3 "identified" consensus rule (≥2 books at the
+exact matched line) is now enforced as a **hard verdict gate**, not just a
+provenance stamp: `evaluate_player` downgrades YES → LEAN whenever
+`consensus_tag != 'identified'`, and soft books (Underdog) plus PrizePicks
+itself are excluded from the count that can produce "identified." A further
+non-spec addition — an automatic AI matchup check on every YES, using FBref
+opponent defense rank as context — runs after this gate and can downgrade to
+LEAN but never blocks on its own failure. See `README_AGENTS.md` → "Verdict
+Rules (the gauntlet)" for the user-facing description.

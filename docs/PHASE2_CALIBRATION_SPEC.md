@@ -492,3 +492,20 @@ All pure-Python, deterministic (fixed seed), numpy-free. File: `tests/test_calib
 - `/home/user/Prizepicks-AI/tests/test_settlement.py` (new/extend), `/home/user/Prizepicks-AI/tests/test_schema_migration.py` (extend) — tests 45–53.
 
 **Authority:** `/home/user/Prizepicks-AI/docs/COUNCIL_MASTER_SPEC.md` lines 18/25/77/102/104-107/169-176. Verification harness: `/tmp/claude-0/-home-user-Prizepicks-AI/160ac435-0d1a-5563-9a5c-be1217e84975/scratchpad/verify_merge.py`.
+
+---
+
+## Addendum — 2026-07-01: world_cup participation gate + retro audit
+
+§3.1's `classify_settlement` minutes floor (`PP_MIN_MINUTES`) previously only
+had an NBA entry. World Cup box scores expose no per-minute figure, only
+ESPN's binary `appearances` stat, so `engine/settlement.py:_participation_minutes`
+now maps that to a synthetic 0.0/90.0 "minutes" and `PP_MIN_MINUTES['world_cup'] = 1.0`
+(`engine/config.py`) is set so a 0.0 (DNP/benched) reading VOIDs instead of
+grading as a settled UNDER. `scripts/audit_dnp.py` re-applies this same gate
+retroactively to rows settled before it existed, gated on `pre_audit_result
+IS NULL` for idempotency (mirrors the deterministic-force-VOID idempotency
+in test 51). `engine/matcher.py:_resolve_kickoff` was also hardened to
+prefer the game closest to "now" among same-team matches, since the previous
+first-substring-match behavior could anchor an edge's `commence_time` to an
+old fixture and confuse this gate's timing.
