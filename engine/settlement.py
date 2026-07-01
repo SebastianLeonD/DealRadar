@@ -376,9 +376,39 @@ def build_record_report() -> list[str]:
     return lines
 
 
+def build_shadow_score_report() -> list[str]:
+    """Headline shadow-model-vs-market Brier numbers (best-effort, never fatal)."""
+    try:
+        from engine.shadow_score import score, _fetch_rows
+
+        result = score(_fetch_rows())
+        lines = ['', 'Shadow model vs market (Brier, settled edges):']
+        lines.append(
+            f"  n scored w/ model_p: {result['n_model']}  "
+            f"model Brier: {result['model_brier_all']:.4f}"
+            if result['model_brier_all'] is not None
+            else f"  n scored w/ model_p: {result['n_model']}"
+        )
+        if result['n_paired']:
+            lines.append(
+                f"  paired subset n={result['n_paired']}: "
+                f"model {result['model_brier_paired']:.4f} vs "
+                f"consensus {result['consensus_brier']:.4f} vs "
+                f"baseline {result['baseline_brier']:.4f}"
+            )
+            lines.append(
+                f"  mean paired diff vs consensus: {result['diff_vs_consensus']:+.4f} "
+                "(negative = model better)"
+            )
+        return lines
+    except Exception as exc:
+        return ['', f"Shadow model scorer failed (non-fatal): {exc}"]
+
+
 def main() -> None:
     _, report = settle_edges()
     report.extend(build_record_report())
+    report.extend(build_shadow_score_report())
     print('\n'.join(report))
 
 

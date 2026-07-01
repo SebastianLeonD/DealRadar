@@ -512,3 +512,10 @@ lifetime record still counts them).
 **Kelly stake sizing:** slip suggestions now also carry a fractional-Kelly stake
 (`kelly_pct`) — the matcher tells you not just *which* slip but *how much* of
 your bankroll to put on it.
+
+**Shadow-model scorer:** `engine/shadow_score.py` is a lightweight, standalone
+Brier readout — not a gate — that answers the one question the FBref shadow
+model exists for: is `model_p` closer to reality than `consensus_p`/`baseline_p`
+on the same settled edges? Run `python engine/shadow_score.py` any time; its
+headline numbers also get appended (best-effort, non-fatal) to `python
+engine/settlement.py` output after the post-fix record.
