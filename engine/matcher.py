@@ -12,7 +12,7 @@ that is actually the sharp books pricing in news PP hasn't reacted to.
 """
 
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -73,9 +73,12 @@ def _parse_ts(value: str | None) -> datetime | None:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value)
-    except ValueError:
+        ts = datetime.fromisoformat(value)
+    except (ValueError, TypeError):
         return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts
 
 
 def _edge_game_date(commence_time: str | None, captured_at: str | None) -> str | None:
@@ -120,6 +123,43 @@ def build_trap_flags(
     return flags
 
 
+def _drop_stale_books(books: dict[str, dict]) -> dict[str, dict]:
+    """Drop a book's ladder if it's older than STALE_MAX_MINUTES vs the newest
+    book for this player — contemporaneity between books, not wall-clock
+    freshness (a matcher run an hour after fetching is normal usage)."""
+    from engine.config import STALE_MAX_MINUTES
+
+    timestamps = {book: _parse_ts(entry.get('captured_at')) for book, entry in books.items()}
+    known = [ts for ts in timestamps.values() if ts is not None]
+    if not known:
+        return books
+    newest = max(known)
+    cutoff = newest - timedelta(minutes=STALE_MAX_MINUTES)
+    return {
+        book: entry for book, entry in books.items()
+        if timestamps[book] is None or timestamps[book] >= cutoff
+    }
+
+
+def _drop_dead_books(books: dict[str, dict]) -> dict[str, dict]:
+    """Drop a book's ladder if its game has already started.
+
+    A stale player, absent from today's book fetch, keeps its last-known
+    ladder rows in storage from a finished match — all equally "fresh"
+    against each other, so _drop_stale_books (relative freshness) can't catch
+    it. This checks wall-clock: commence_time in the past means the game is
+    over/live and the ladder is dead, regardless of every book agreeing on it.
+    """
+    now = datetime.now(timezone.utc)
+    kept = {}
+    for book, entry in books.items():
+        commence = _parse_ts(entry.get('commence_time'))
+        if commence is not None and commence <= now:
+            continue
+        kept[book] = entry
+    return kept
+
+
 def evaluate_player(
     pp_player: dict,
     books: dict[str, dict],
@@ -129,6 +169,8 @@ def evaluate_player(
     extra_flags: list[str] | None = None,
 ) -> dict | None:
     pp_line = pp_player['line']
+    books = _drop_dead_books(books)
+    books = _drop_stale_books(books)
 
     book_probs: dict[str, float] = {}
     latest_capture = None
@@ -150,13 +192,16 @@ def evaluate_player(
     play = 'OVER' if consensus_over >= 0.5 else 'UNDER'
     win_prob = consensus_over if play == 'OVER' else 1 - consensus_over
 
-    # IDENTIFIED line-matched consensus (council OBJ-1/3): only books quoting the
-    # EXACT PP line contribute. The interpolated win_prob above is shape-
-    # contingent; consensus_tag records whether an identified (>=2 same-line
-    # books) ground truth backs this edge or it rests on the asserted shape.
+    # IDENTIFIED line-matched consensus (council OBJ-1/3): only SHARP books
+    # quoting the EXACT PP line contribute — a soft pick'em app (SOFT_BOOKS)
+    # or a prizepicks row must never satisfy the >=2 count. The interpolated
+    # win_prob above is shape-contingent; consensus_tag records whether an
+    # identified (>=2 same-line sharp books) ground truth backs this edge or
+    # it rests on the asserted shape.
     exact_line_probs = {
         book: p_over
         for book, entry in books.items()
+        if book not in SOFT_BOOKS and book != 'prizepicks'
         for line, p_over in entry['points']
         if abs(line - pp_line) < 1e-9
     }
@@ -317,16 +362,61 @@ def evaluate_combo(
 
 
 def _resolve_kickoff(team: str | None, games: list[dict]) -> tuple[str | None, str | None]:
-    """Find the DK game whose 'Away @ Home' string names this team."""
+    """Find the DK game whose 'Away @ Home' string names this team.
+
+    A team can appear in several games across a tournament, so every match is
+    collected first (exact normalized side match preferred over substring),
+    then the one most relevant to "now" is picked: the earliest game that is
+    upcoming or in progress (commence_time >= now - 6h), else the latest past
+    game. This stops a stale group-stage fixture's kickoff leaking onto a
+    later game for the same team.
+    """
     if not team:
         return None, None
     needle = team.strip().lower()
+
+    exact_matches = []
+    loose_matches = []
     for game in games:
         for side in game['game'].split('@'):
             side = side.strip().lower()
-            if side and (side in needle or needle in side):
-                return game['commence_time'], game['game']
-    return None, None
+            if not side:
+                continue
+            if side == needle:
+                exact_matches.append(game)
+                break
+            if side in needle or needle in side:
+                loose_matches.append(game)
+                break
+
+    matches = exact_matches or loose_matches
+    if not matches:
+        return None, None
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=6)
+
+    upcoming = []
+    past = []
+    for game in matches:
+        ts = _parse_ts(game.get('commence_time'))
+        if ts is None:
+            continue
+        if ts >= cutoff:
+            upcoming.append((ts, game))
+        else:
+            past.append((ts, game))
+
+    if upcoming:
+        upcoming.sort(key=lambda pair: pair[0])
+        chosen = upcoming[0][1]
+    elif past:
+        past.sort(key=lambda pair: pair[0])
+        chosen = past[-1][1]
+    else:
+        chosen = matches[0]
+
+    return chosen['commence_time'], chosen['game']
 
 
 def price_model_edges(sport: dict, flagged_bets: list[dict]) -> bool:

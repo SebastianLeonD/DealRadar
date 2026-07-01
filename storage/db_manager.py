@@ -171,6 +171,14 @@ EDGES_MIGRATION_COLUMNS = {
     'model_credibility': 'REAL',            # 0..1 player-vs-baseline shrink weight
     'model_n_matches': 'INTEGER',           # FBref appearances behind the prior
     'model_source': 'TEXT',                 # 'fbref_poisson_prior' | NULL
+    # Retroactive DNP audit (scripts/audit_dnp.py): the pre-audit result is
+    # preserved here before a row gets overwritten to VOID, and NULL/already-set
+    # is what makes a re-run idempotent.
+    'pre_audit_result': 'TEXT',
+}
+
+BETS_MIGRATION_COLUMNS = {
+    'pre_audit_result': 'TEXT',
 }
 
 
@@ -186,7 +194,11 @@ def get_connection(db_path: Path = DB_PATH) -> sqlite3.Connection:
 
 
 def _migrate(connection: sqlite3.Connection) -> None:
-    for table, columns in (('props', PROPS_MIGRATION_COLUMNS), ('edges', EDGES_MIGRATION_COLUMNS)):
+    for table, columns in (
+        ('props', PROPS_MIGRATION_COLUMNS),
+        ('edges', EDGES_MIGRATION_COLUMNS),
+        ('bets', BETS_MIGRATION_COLUMNS),
+    ):
         existing = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
         for column, ddl in columns.items():
             if column not in existing:
@@ -634,6 +646,26 @@ def settle_edge(
         connection.commit()
 
 
+def force_void_edge(edge_id: int, void_reason: str, db_path: Path = DB_PATH) -> None:
+    """Force-void an edge that's been unsettled too long (STALE_SETTLE_MAX_HOURS).
+
+    Mirrors settle_edge's partition write but stamps force_voided_at so a
+    force-void is distinguishable from a normally-graded VOID."""
+    with get_connection(db_path) as connection:
+        now = utc_now()
+        connection.execute(
+            """
+            UPDATE edges
+            SET result = 'VOID', settled_at = ?,
+                settlement_status = 'VOID', outcome_over = NULL,
+                void_reason = ?, force_voided_at = ?
+            WHERE id = ?
+            """,
+            (now, void_reason, now, edge_id),
+        )
+        connection.commit()
+
+
 def get_record_summary(db_path: Path = DB_PATH) -> dict:
     """Win/loss record of settled edges, overall and by verdict.
 
@@ -789,6 +821,7 @@ def get_bet_record_summary(db_path: Path = DB_PATH) -> dict:
         'wins': 0,
         'losses': 0,
         'pushes': 0,
+        'voids': 0,
         'hit_rate': None,
         'total_staked': 0.0,
         'by_verdict': {},
@@ -801,7 +834,7 @@ def get_bet_record_summary(db_path: Path = DB_PATH) -> dict:
         summary['settled'] += 1
         verdict = row['verdict'] or 'UNRATED'
         bucket = summary['by_verdict'].setdefault(
-            verdict, {'wins': 0, 'losses': 0, 'pushes': 0}
+            verdict, {'wins': 0, 'losses': 0, 'pushes': 0, 'voids': 0}
         )
         if result == 'WIN':
             summary['wins'] += 1
@@ -809,6 +842,11 @@ def get_bet_record_summary(db_path: Path = DB_PATH) -> dict:
         elif result == 'LOSS':
             summary['losses'] += 1
             bucket['losses'] += 1
+        elif result == 'VOID':
+            # A VOID is a refund, not a push — never fold it into the push
+            # count or the hit-rate denominator (mirrors get_record_summary).
+            summary['voids'] += 1
+            bucket['voids'] += 1
         else:
             summary['pushes'] += 1
             bucket['pushes'] += 1

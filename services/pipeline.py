@@ -141,12 +141,16 @@ def dedupe_edges(frame: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
 
 def run_script(relative_path: str) -> tuple[bool, str]:
     script_path = PROJECT_ROOT / relative_path
-    result = subprocess.run(
-        [sys.executable, str(script_path)],
-        cwd=PROJECT_ROOT,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script_path)],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"{relative_path} timed out after 900s"
     output = (result.stdout or "") + (result.stderr or "")
     return result.returncode == 0, output.strip()
 
@@ -223,7 +227,12 @@ def load_edges_dataframe(
             book_count,
             commence_time,
             result,
-            actual_value
+            actual_value,
+            model_p,
+            model_p_side,
+            model_credibility,
+            consensus_n,
+            consensus_tag
         FROM edges
         WHERE 1 = 1
     """

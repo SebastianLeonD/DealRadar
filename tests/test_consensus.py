@@ -134,3 +134,26 @@ def test_soft_only_prop_is_flagged_and_capped():
     assert SOFT_ONLY_FLAG in ev["flags"]
     assert ev["book_count"] == 1
     assert ev["verdict"] == "LEAN"  # soft-only never a confident YES
+
+
+def test_soft_book_does_not_count_toward_identified_tag():
+    # One sharp book (fanduel) + one soft pick'em app (underdog) at the same
+    # exact line must NOT satisfy the >=2 count for 'identified' — the tag is
+    # the calibration gate's eligibility key and must mean genuinely sharp.
+    pp = {"player_name": "X", "line": 1.5, "stat_type": "player_shots", "team": "FRA"}
+    books = {
+        "fanduel": _poisson_book(0.55, line=1.5),
+        "underdog": _poisson_book(0.60, line=1.5),
+    }
+    ev = evaluate_player(pp, books, {}, model="poisson")
+    assert ev["consensus_tag"] == "single_book"
+
+
+def test_two_sharp_books_at_same_line_is_identified():
+    pp = {"player_name": "X", "line": 1.5, "stat_type": "player_shots", "team": "FRA"}
+    books = {
+        "fanduel": _poisson_book(0.55, line=1.5),
+        "draftkings": _poisson_book(0.58, line=1.5),
+    }
+    ev = evaluate_player(pp, books, {}, model="poisson")
+    assert ev["consensus_tag"] == "identified"

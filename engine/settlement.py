@@ -12,10 +12,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from engine.config import PP_MIN_MINUTES, PP_PARTIAL_FLOOR, STALE_SETTLE_MAX_HOURS
 from engine.name_matcher import match_player_name
 from engine.sports import get_sport, sport_for_stat
 from scrapers.results_api import fetch_stats_for_date
 from storage.db_manager import (
+    force_void_edge,
     get_record_summary,
     get_unsettled_bets,
     get_unsettled_edges,
@@ -65,17 +67,36 @@ def game_finished(edge: dict, now: datetime) -> bool:
     return anchor is not None and now >= anchor + timedelta(hours=SETTLE_AFTER_HOURS)
 
 
-def resolve_actual(row: dict, stats_cache: dict) -> tuple[float | None, str]:
-    """Look up a play's actual stat from box scores. Returns (value, status)
-    where status is 'ok', 'missing' (no box-score match) or 'unknown' (stat
-    has no box-score source, e.g. a 1H prop)."""
+def _participation_minutes(sport: dict, box: dict, matched_names: list[str]) -> float | None:
+    """Synthetic 0.0/90.0 'minutes' from ESPN's binary participation stat
+    (e.g. soccer 'appearances'). None if the sport has no such stat, or the
+    matched player's box-score row doesn't carry it. Combo plays take the
+    minimum across legs so any DNP leg drags the whole play to VOID."""
+    participation_stat = sport.get('espn_participation_stat')
+    if participation_stat is None:
+        return None
+    minutes = None
+    for name in matched_names:
+        value = box[name].get(participation_stat)
+        if value is None:
+            continue
+        leg_minutes = 90.0 if value >= 1.0 else 0.0
+        minutes = leg_minutes if minutes is None else min(minutes, leg_minutes)
+    return minutes
+
+
+def resolve_actual(row: dict, stats_cache: dict) -> tuple[float | None, str, float | None]:
+    """Look up a play's actual stat from box scores. Returns (value, status,
+    minutes) where status is 'ok', 'missing' (no box-score match) or 'unknown'
+    (stat has no box-score source, e.g. a 1H prop). minutes is the real/synthetic
+    participation figure for the settlement floor, or None if unavailable."""
     sport_key = sport_for_stat(row['stat_type'])
     if sport_key is None:
-        return None, 'unknown'
+        return None, 'unknown', None
     sport = get_sport(sport_key)
     espn_stat = sport['espn_stats'].get(row['stat_type'])
     if espn_stat is None:
-        return None, 'unknown'
+        return None, 'unknown', None
 
     legs = [name.strip() for name in row['dk_player_name'].split(' + ')]
     for date in candidate_dates(row):
@@ -86,14 +107,17 @@ def resolve_actual(row: dict, stats_cache: dict) -> tuple[float | None, str]:
             )
         box = stats_cache[cache_key]
         leg_values = []
+        matched_names = []
         for leg in legs:  # combo plays sum every leg's actual
             matched, _ = match_player_name(leg, list(box.keys()))
             if matched is None or espn_stat not in box[matched]:
                 break
             leg_values.append(box[matched][espn_stat])
+            matched_names.append(matched)
         if len(leg_values) == len(legs):
-            return sum(leg_values), 'ok'
-    return None, 'missing'
+            minutes = _participation_minutes(sport, box, matched_names)
+            return sum(leg_values), 'ok', minutes
+    return None, 'missing', None
 
 
 def grade(play: str, pp_line: float, actual: float) -> str:
@@ -162,7 +186,7 @@ def settle_edges() -> tuple[int, list[str]]:
     unknown_stat = 0
 
     for edge in pending:
-        actual, status = resolve_actual(edge, stats_cache)
+        actual, status, minutes = resolve_actual(edge, stats_cache)
         if status == 'unknown':
             unknown_stat += 1
             continue
@@ -171,10 +195,18 @@ def settle_edges() -> tuple[int, list[str]]:
             continue
 
         result = grade(edge['play'], edge['pp_line'], actual)
-        # Phase-2 partition (minutes unavailable from the box-score merge today,
-        # so participation gating is a no-op until a minutes feed lands; the
-        # canonical OVER outcome + status are persisted regardless).
-        part = classify_settlement(edge['play'], edge['pp_line'], actual)
+        # Phase-2 partition: participation gate runs on real/synthetic minutes
+        # when the sport's box score exposes them (see resolve_actual), so a
+        # DNP player is VOIDed instead of graded as an UNDER win.
+        sport_key = sport_for_stat(edge['stat_type'])
+        part = classify_settlement(
+            edge['play'], edge['pp_line'], actual,
+            minutes=minutes,
+            min_minutes=PP_MIN_MINUTES.get(sport_key, 0.0),
+            partial_floor=PP_PARTIAL_FLOOR.get(sport_key),
+        )
+        if part['status'] == 'VOID':
+            result = 'VOID'
         settle_edge(
             edge['id'], result, actual,
             settlement_status=part['status'], outcome_over=part['outcome_over'],
@@ -189,6 +221,23 @@ def settle_edges() -> tuple[int, list[str]]:
 
     if unknown_stat:
         lines.append(f"  ({unknown_stat} edge(s) skipped: stat not in any sport config)")
+
+    # Force-void anything that's been unsettled too long (STALE_SETTLE_MAX_HOURS)
+    # so a bad match/box-score gap doesn't sit open forever and starve the
+    # calibration gate's SCORED pool.
+    stale_voided = 0
+    for edge in get_unsettled_edges():
+        anchor = _parse_ts(edge.get('commence_time')) or _parse_ts(
+            edge.get('flagged_at') or edge.get('created_at')
+        )
+        if anchor and now - anchor > timedelta(hours=STALE_SETTLE_MAX_HOURS):
+            force_void_edge(edge['id'], 'stale_unsettled')
+            stale_voided += 1
+    if stale_voided:
+        lines.append(
+            f"Force-voided {stale_voided} stale unsettled edge(s) "
+            f"(>{STALE_SETTLE_MAX_HOURS}h)."
+        )
 
     lines.insert(0, f"Settled {settled} edge(s); {missing} had no box score match.")
     return settled, lines
@@ -207,7 +256,7 @@ def settle_bets() -> tuple[int, list[str]]:
     settled = missing = unknown_stat = 0
 
     for bet in pending:
-        actual, status = resolve_actual(bet, stats_cache)
+        actual, status, minutes = resolve_actual(bet, stats_cache)
         if status == 'unknown':
             unknown_stat += 1
             continue
@@ -215,6 +264,17 @@ def settle_bets() -> tuple[int, list[str]]:
             missing += 1
             continue
         result = grade(bet['play'], bet['pp_line'], actual)
+        # Bets have no settlement_status column, so a DNP just gets result
+        # overwritten to VOID (same participation gate as edges).
+        sport_key = sport_for_stat(bet['stat_type'])
+        part = classify_settlement(
+            bet['play'], bet['pp_line'], actual,
+            minutes=minutes,
+            min_minutes=PP_MIN_MINUTES.get(sport_key, 0.0),
+            partial_floor=PP_PARTIAL_FLOOR.get(sport_key),
+        )
+        if part['status'] == 'VOID':
+            result = 'VOID'
         settle_bet(bet['id'], result, actual)
         settled += 1
         stat_label = bet['stat_type'].replace('player_', '')

@@ -125,6 +125,13 @@ SPORTS = {
             'player_goalie_saves': 'saves',
             # 1H stats have no ESPN box-score source; settlement skips them
         },
+        # ESPN soccer rosters carry the FULL squad (unused subs included) with
+        # an 'appearances' stat: 1.0 if the player ever entered the match, 0.0
+        # if benched the whole game. No per-minute figure is exposed, so this
+        # is a binary participation signal, not real minutes — settlement maps
+        # it to a synthetic 0/90 "minutes" so classify_settlement's minutes
+        # floor (PP_MIN_MINUTES) VOIDs a true DNP instead of grading it UNDER.
+        'espn_participation_stat': 'appearances',
         # 69 matches sit in the events feed; only fetch odds for near kickoffs
         'max_hours_ahead': 36,
         'has_injury_feed': False,

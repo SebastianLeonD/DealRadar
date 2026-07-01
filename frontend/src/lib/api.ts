@@ -49,9 +49,14 @@ export interface Edge {
   verdict: "YES" | "LEAN" | "NO" | null;
   flags: string | null;
   book_count: number | null;
-  result: "WIN" | "LOSS" | "PUSH" | null;
+  result: "WIN" | "LOSS" | "PUSH" | "VOID" | null;
   actual_value: number | null;
   underdog?: EdgeUnderdog | null;
+  model_p?: number | null;
+  model_p_side?: number | null;
+  model_credibility?: number | null;
+  consensus_n?: number | null;
+  consensus_tag?: "identified" | "single_book" | "degraded" | string | null;
 }
 
 export interface EdgesResponse {
@@ -70,9 +75,10 @@ export interface RecordSummary {
   wins: number;
   losses: number;
   pushes: number;
+  voids: number;
   hit_rate: number | null;
   avg_predicted_prob: number | null;
-  by_verdict: Record<string, { wins: number; losses: number; pushes: number }>;
+  by_verdict: Record<string, { wins: number; losses: number; pushes: number; voids: number }>;
 }
 
 export interface ClvRow {
@@ -158,6 +164,11 @@ export interface PpEngine {
   book_count: number | null;
   dk_line: number | null;
   flags: string | null;
+  model_p?: number | null;
+  model_p_side?: number | null;
+  model_credibility?: number | null;
+  consensus_n?: number | null;
+  consensus_tag?: "identified" | "single_book" | "degraded" | string | null;
 }
 
 export interface PpBoardProp {
@@ -201,6 +212,7 @@ export interface SlipLeg {
   team: string | null;
   opponent: string | null;
   game: string | null;
+  commence_time: string | null;
   stat_type: string;
   side: "OVER" | "UNDER";
   provider: "PP" | "UD";
@@ -257,7 +269,7 @@ export interface Bet {
   book_count: number | null;
   commence_time: string | null;
   stake: number | null;
-  result: "WIN" | "LOSS" | "PUSH" | null;
+  result: "WIN" | "LOSS" | "PUSH" | "VOID" | null;
   actual_value: number | null;
 }
 
@@ -267,9 +279,10 @@ export interface BetSummary {
   wins: number;
   losses: number;
   pushes: number;
+  voids: number;
   hit_rate: number | null;
   total_staked: number;
-  by_verdict: Record<string, { wins: number; losses: number; pushes: number }>;
+  by_verdict: Record<string, { wins: number; losses: number; pushes: number; voids: number }>;
 }
 
 export interface BetsResponse {

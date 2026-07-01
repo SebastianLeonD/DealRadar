@@ -44,7 +44,31 @@ function toEdge(group: PpBoardGroup, prop: PpBoardProp, id: number): Edge {
     book_count: e?.book_count ?? null,
     dk_line: e?.dk_line ?? null,
     commence_time: prop.start_time ?? null,
+    model_p: e?.model_p ?? null,
+    model_p_side: e?.model_p_side ?? null,
+    model_credibility: e?.model_credibility ?? null,
+    consensus_n: e?.consensus_n ?? null,
+    consensus_tag: e?.consensus_tag ?? null,
   } as unknown as Edge;
+}
+
+const CONSENSUS_LABEL: Record<string, string> = {
+  identified: "books at this line",
+  single_book: "single book",
+  degraded: "estimated",
+};
+
+function consensusLabel(tag: string | null | undefined, n: number | null | undefined): string {
+  if (!tag) return "";
+  if (tag === "identified") return `${n ?? "2+"} ${CONSENSUS_LABEL.identified}`;
+  return CONSENSUS_LABEL[tag] ?? tag;
+}
+
+function modelConfidence(credibility: number | null | undefined): string {
+  if (credibility == null) return "low confidence";
+  if (credibility < 0.34) return "low confidence";
+  if (credibility < 0.67) return "medium confidence";
+  return "high confidence";
 }
 
 function groupLabel(group: PpBoardGroup): string {
@@ -80,29 +104,32 @@ const APP_NAME: Record<PpUnderdog["over_app"], string> = {
 /* ---------- track bet ---------- */
 
 function TrackBetButton({ edge }: { edge: Edge }) {
-  const [state, setState] = useState<"idle" | "saving" | "done">("idle");
+  const [state, setState] = useState<"idle" | "saving" | "done" | "error">("idle");
   const track = async () => {
     setState("saving");
     try {
-      await api.trackBet(edge);
-      setState("done");
+      const res = await api.trackBet(edge);
+      setState(res.ok ? "done" : "error");
     } catch {
-      setState("idle");
+      setState("error");
     }
   };
   const done = state === "done";
+  const failed = state === "error";
   return (
     <button
       onClick={track}
-      disabled={state !== "idle"}
+      disabled={state === "saving" || done}
       className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors ${
         done
           ? "border-bet/40 bg-bet-soft text-bet"
-          : "border-line-strong bg-card text-ink-soft hover:border-ink hover:text-ink"
+          : failed
+            ? "border-skip/40 bg-skip-soft text-skip"
+            : "border-line-strong bg-card text-ink-soft hover:border-ink hover:text-ink"
       }`}
     >
       {done ? <Check size={13} /> : <BookmarkPlus size={13} />}
-      {done ? "Tracked" : "Track bet"}
+      {done ? "Tracked" : failed ? "Failed — retry" : "Track bet"}
     </button>
   );
 }
@@ -298,6 +325,19 @@ function PlayerCard({
         <div className="mt-2 flex items-start gap-1.5 rounded-md border border-maybe/25 bg-maybe-soft px-2.5 py-1.5">
           <AlertTriangle size={12} className="mt-0.5 shrink-0 text-maybe" />
           <p className="text-[11px] leading-relaxed text-maybe">{e.flags}</p>
+        </div>
+      )}
+
+      {(e?.model_p != null || e?.consensus_tag) && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {e?.model_p != null && (
+            <span className="text-[11px] text-ink-faint">
+              Model: {(e.model_p * 100).toFixed(0)}% over ({modelConfidence(e.model_credibility)})
+            </span>
+          )}
+          {e?.consensus_tag && (
+            <Badge variant="neutral">{consensusLabel(e.consensus_tag, e.consensus_n)}</Badge>
+          )}
         </div>
       )}
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI, Query
@@ -65,7 +66,25 @@ def get_actions():
     return ACTION_CATALOG
 
 
+# Pipeline actions shell out / touch shared JSON+SQLite state; running two at
+# once clobbers each other, so only one may run at a time.
+_pipeline_lock = threading.Lock()
+
+
+def _pipeline_locked(handler):
+    def wrapper():
+        if not _pipeline_lock.acquire(blocking=False):
+            return {"ok": False, "error": "A pipeline action is already running — wait for it to finish."}
+        try:
+            return handler()
+        finally:
+            _pipeline_lock.release()
+    wrapper.__name__ = handler.__name__
+    return wrapper
+
+
 @app.post("/api/pipeline/fetch-sharp")
+@_pipeline_locked
 def pipeline_fetch_sharp():
     success, output = run_script("scrapers/draftkings_api.py")
     if success:
@@ -74,6 +93,7 @@ def pipeline_fetch_sharp():
 
 
 @app.post("/api/pipeline/parse-pp")
+@_pipeline_locked
 def pipeline_parse_pp():
     if not pp_raw_file_exists():
         return {
@@ -87,6 +107,7 @@ def pipeline_parse_pp():
 
 
 @app.post("/api/pipeline/run-matcher")
+@_pipeline_locked
 def pipeline_run_matcher():
     ingest_staging()
     flagged = find_edges(sync_staging=False)
@@ -98,12 +119,14 @@ def pipeline_run_matcher():
 
 
 @app.post("/api/pipeline/full")
+@_pipeline_locked
 def pipeline_full():
     success, output = run_full_pipeline()
     return {"success": success, "output": output}
 
 
 @app.post("/api/pipeline/fetch-form")
+@_pipeline_locked
 def pipeline_fetch_form():
     wc_ok, wc_out = run_script("scrapers/fbref_stats.py")
     club_ok, club_out = run_script("scrapers/fbref_club_stats.py")
@@ -112,12 +135,14 @@ def pipeline_fetch_form():
 
 
 @app.post("/api/pipeline/fetch-underdog")
+@_pipeline_locked
 def pipeline_fetch_underdog():
     success, output = run_script("scrapers/underdog_api.py")
     return {"success": success, "output": output or "Underdog board updated."}
 
 
 @app.post("/api/pipeline/settle")
+@_pipeline_locked
 def pipeline_settle():
     success, output = run_script("engine/settlement.py")
     return {"success": success, "output": output or "Settlement complete."}
@@ -145,6 +170,11 @@ class AnalyzeRequest(BaseModel):
     book_count: int | None = None
     commence_time: str | None = None
     flags: str | None = None
+    model_p: float | None = None
+    model_p_side: float | None = None
+    model_credibility: float | None = None
+    consensus_n: int | None = None
+    consensus_tag: str | None = None
     mode: str = "full"  # "full" (with sharp books) or "stats_only" (PrizePicks-only)
 
 
@@ -327,6 +357,11 @@ def get_prizepicks_board():
                 "book_count": edge.get("book_count"),
                 "dk_line": edge.get("dk_line"),
                 "flags": edge.get("flags"),
+                "model_p": edge.get("model_p"),
+                "model_p_side": edge.get("model_p_side"),
+                "model_credibility": edge.get("model_credibility"),
+                "consensus_n": edge.get("consensus_n"),
+                "consensus_tag": edge.get("consensus_tag"),
             }
         g["props"].append(
             {

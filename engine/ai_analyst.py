@@ -212,6 +212,11 @@ def build_context(edge: dict, mode: str = "full") -> dict:
         "trap_flags": flag_list,
         "team_form": form,
         "player_form": player_rate,
+        "model_p": _num(edge.get("model_p")),
+        "model_p_side": _num(edge.get("model_p_side")),
+        "model_credibility": _num(edge.get("model_credibility")),
+        "consensus_n": edge.get("consensus_n"),
+        "consensus_tag": edge.get("consensus_tag"),
     }
 
 
@@ -276,6 +281,29 @@ def format_prompt(ctx: dict) -> str:
         if form.get("opponent_defense"):
             lines.append(f"  {ctx.get('opponent')} defense "
                          f"({form.get('opponent_games')}g): {form['opponent_defense']}")
+
+    model_p_side = ctx.get("model_p_side")
+    if model_p_side is not None:
+        credibility = ctx.get("model_credibility")
+        confidence = (
+            "low confidence" if credibility is None or credibility < 0.34
+            else "medium confidence" if credibility < 0.67
+            else "high confidence"
+        )
+        lines.append("")
+        lines.append(
+            f"Independent FBref form model puts P({ctx.get('engine_favoured_side', 'this side')}) "
+            f"at {_pct(model_p_side)} ({confidence})."
+        )
+
+    consensus_tag = ctx.get("consensus_tag")
+    if consensus_tag:
+        tag_label = {
+            "identified": f"identified ({ctx.get('consensus_n')} books at the exact line)",
+            "single_book": "single book only",
+            "degraded": "degraded (interpolated estimate)",
+        }.get(consensus_tag, consensus_tag)
+        lines.append(f"Book consensus quality: {tag_label}.")
 
     flags = ctx.get("trap_flags") or []
     lines.append("")

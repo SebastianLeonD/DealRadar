@@ -24,11 +24,11 @@ function verdictVariant(v: SlipLeg["verdict"]): "bet" | "maybe" | "skip" | "neut
 /* ---------- track a single leg ---------- */
 
 function TrackLeg({ leg }: { leg: SlipLeg }) {
-  const [state, setState] = useState<"idle" | "saving" | "done">("idle");
+  const [state, setState] = useState<"idle" | "saving" | "done" | "error">("idle");
   const track = async () => {
     setState("saving");
     try {
-      await api.trackBet({
+      const res = await api.trackBet({
         player: leg.player,
         dk_player_name: leg.player,
         team: leg.team,
@@ -40,25 +40,29 @@ function TrackLeg({ leg }: { leg: SlipLeg }) {
         ev_percent: leg.ev_percent,
         verdict: leg.verdict,
         edge_type: leg.edge_type,
+        commence_time: leg.commence_time,
       } as unknown as Edge);
-      setState("done");
+      setState(res.ok ? "done" : "error");
     } catch {
-      setState("idle");
+      setState("error");
     }
   };
   const done = state === "done";
+  const failed = state === "error";
   return (
     <button
       onClick={track}
-      disabled={state !== "idle"}
+      disabled={state === "saving" || done}
       className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors ${
         done
           ? "border-bet/40 bg-bet-soft text-bet"
-          : "border-line-strong bg-card text-ink-soft hover:border-ink hover:text-ink"
+          : failed
+            ? "border-skip/40 bg-skip-soft text-skip"
+            : "border-line-strong bg-card text-ink-soft hover:border-ink hover:text-ink"
       }`}
     >
       {done ? <Check size={13} /> : <BookmarkPlus size={13} />}
-      {done ? "Tracked" : "Track"}
+      {done ? "Tracked" : failed ? "Failed — retry" : "Track"}
     </button>
   );
 }

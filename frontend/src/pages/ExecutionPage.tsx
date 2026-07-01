@@ -56,11 +56,46 @@ function feedSentence(status?: string, detail?: string): string {
   return detail;
 }
 
+// mm:ss for the live elapsed timer.
+const fmtElapsed = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+// Steps that can run for minutes — tell the user why, so a long run never
+// reads as "frozen".
+const SLOW_NOTE: Partial<Record<ActionKey, string>> = {
+  fetch_sharp: "Calling the odds API for every game…",
+  fetch_form:
+    "First run downloads each World Cup player's form from FBref (rate-limited, ~4s/game) — a few minutes, then it's cached and fast.",
+  run_matcher:
+    "First run pulls World Cup form from FBref (rate-limited) — can take a few minutes; cached after that.",
+  run_full:
+    "Gets lines, reads your board, and finds picks. The form download can take a few minutes on the first run.",
+};
+
+const RUNNING_LABEL: Record<ActionKey, string> = {
+  fetch_sharp: "Get bookmaker lines",
+  parse_pp: "Read your PrizePicks board",
+  fetch_form: "Update World Cup form",
+  fetch_underdog: "Update Underdog lines",
+  run_matcher: "Find the picks",
+  run_full: "Run everything",
+  settle_results: "Grade results",
+};
+
 export function ExecutionPage() {
   const [feeds, setFeeds] = useState<FeedsResponse | null>(null);
   const [log, setLog] = useState("Nothing has run yet this session.");
   const [running, setRunning] = useState<ActionKey | null>(null);
   const [lastDone, setLastDone] = useState<ActionKey | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+
+  // Tick a live elapsed timer while something runs, so a multi-minute backend
+  // call visibly updates instead of looking frozen.
+  useEffect(() => {
+    if (running === null) return;
+    setElapsed(0);
+    const tick = setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => clearInterval(tick);
+  }, [running]);
 
   const refreshFeeds = useCallback(async () => {
     try {
@@ -136,6 +171,23 @@ export function ExecutionPage() {
           </button>
         }
       />
+
+      {/* live running banner — keeps a long backend call visibly alive */}
+      {running !== null && (
+        <div className="mb-6 flex items-start gap-3 rounded-lg border border-ink/30 bg-paper px-5 py-4">
+          <Loader2 size={18} className="mt-0.5 shrink-0 animate-spin text-ink" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-ink">
+              Running “{RUNNING_LABEL[running]}” —{" "}
+              <span className="tnum tabular-nums">{fmtElapsed(elapsed)}</span> elapsed
+            </p>
+            <p className="mt-0.5 text-sm leading-relaxed text-ink-soft">
+              {SLOW_NOTE[running] ?? "Working…"} Keep this tab open and don’t reload —
+              it finishes on the server even if you switch tabs.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* data freshness, in words */}
       <div className="rise rise-1 mb-8 grid gap-3 md:grid-cols-2">

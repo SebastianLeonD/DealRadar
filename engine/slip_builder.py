@@ -113,6 +113,7 @@ def _leg(edge: dict, rec: dict, provider: str) -> dict:
         "team": _clean_team(edge.get("team")),
         "opponent": edge.get("opponent"),
         "game": edge.get("game"),
+        "commence_time": edge.get("commence_time"),
         "stat_type": edge.get("stat_type"),
         "side": (edge.get("play") or "").upper(),
         "provider": provider,

@@ -72,7 +72,11 @@ SE_DEGENERACY_REL = 1e-9          # below this total-SS the paired d is constant
 # --- Settlement (Phase-2) ---------------------------------------------------
 # Strict minutes floor per sport: minutes < floor -> VOID (a recorded 0.0 with a
 # 0.0 floor is NOT voided). Partial-game floor flags but retains the row.
-PP_MIN_MINUTES = {"nba": 0.0}
+# world_cup has no per-minute box-score figure (see espn_participation_stat in
+# engine/sports.py) -- settlement maps ESPN's binary 'appearances' stat to a
+# synthetic 0.0/90.0 "minutes", so a floor > 0.0 is required to catch the 0.0
+# (DNP) case; there's no partial-game signal to gate on, so no floor is set.
+PP_MIN_MINUTES = {"nba": 0.0, "world_cup": 1.0}
 PP_PARTIAL_FLOOR = {"nba": 12.0}
 STALE_SETTLE_MAX_HOURS = 72       # deterministic force-VOID horizon (replayable)
 

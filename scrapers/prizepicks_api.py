@@ -6,6 +6,7 @@ the sport's pp_stat_map can be extended from real board data.
 """
 
 import json
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -18,6 +19,15 @@ RAW_FILE = Path('data/raw/prizepicks_raw.json')
 OUTPUT_FILE = Path('data/processed/live.json')
 BOARD_FILE = Path('data/processed/pp_board.json')
 GAMES_FILE = Path('data/processed/pp_games.json')
+
+
+def _atomic_write_json(path: Path, data) -> None:
+    """Write JSON to a temp file in the same dir, then os.replace() it in —
+    so a reader never sees a partially-written board/games file."""
+    tmp_path = path.with_suffix(path.suffix + '.tmp')
+    with tmp_path.open('w') as file:
+        json.dump(data, file, indent=4)
+    os.replace(tmp_path, path)
 
 
 def build_player_lookup(included):
@@ -201,17 +211,14 @@ def main():
     clean_picks, skipped_stats = parse_prizepicks_board(raw_data, sport)
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    with OUTPUT_FILE.open('w') as file:
-        json.dump(clean_picks, file, indent=4)
+    _atomic_write_json(OUTPUT_FILE, clean_picks)
 
     full_board = build_full_board(raw_data, sport)
-    with BOARD_FILE.open('w') as file:
-        json.dump(full_board, file, indent=4)
+    _atomic_write_json(BOARD_FILE, full_board)
     print(f"Saved full PrizePicks board ({len(full_board)} props) to {BOARD_FILE}")
 
     games = build_games(raw_data)
-    with GAMES_FILE.open('w') as file:
-        json.dump(games, file, indent=4)
+    _atomic_write_json(GAMES_FILE, games)
     print(f"Saved {len(games)} games to {GAMES_FILE}")
 
     kept = Counter(pick['stat_type'] for pick in clean_picks)

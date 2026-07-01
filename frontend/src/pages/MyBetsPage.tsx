@@ -103,7 +103,7 @@ export function MyBetsPage() {
       setData({
         bets: [],
         summary: {
-          total: 0, settled: 0, wins: 0, losses: 0, pushes: 0,
+          total: 0, settled: 0, wins: 0, losses: 0, pushes: 0, voids: 0,
           hit_rate: null, total_staked: 0, by_verdict: {},
         },
       });
