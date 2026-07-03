@@ -7,10 +7,13 @@ on settled edges, whether the shadow model's logged model_p is closer to
 reality than the market's consensus_p / baseline_p.
 
 Pure stdlib (sqlite3, statistics). Run directly: `python engine/shadow_score.py`.
+Score a sidecar shadow model instead (same metrics, same settled edges, plus a
+paired v2-vs-v1 diff): `python engine/shadow_score.py --model glm_v2`.
 """
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -49,6 +52,30 @@ def _fetch_rows(db_path: Path = DB_PATH) -> list[dict]:
               AND model_p IS NOT NULL
               AND outcome_over IS NOT NULL
             """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _fetch_sidecar_rows(model_name: str, db_path: Path = DB_PATH) -> list[dict]:
+    """Settled edges joined to a sidecar model's predictions. Carries the v1
+    column (edges.model_p) alongside so v2-vs-v1 pairs on identical edges."""
+    init_db(db_path)
+    with get_connection(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT mp.model_p       AS model_p,
+                   mp.model_credibility AS model_credibility,
+                   e.model_p        AS v1_model_p,
+                   e.consensus_p, e.baseline_p, e.outcome_over,
+                   e.stat_type, e.game_date
+            FROM edges e
+            JOIN model_predictions mp
+              ON mp.edge_id = e.id AND mp.model_name = ?
+            WHERE e.settlement_status = 'SCORED'
+              AND mp.model_p IS NOT NULL
+              AND e.outcome_over IS NOT NULL
+            """,
+            (model_name,),
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -97,6 +124,13 @@ def score(rows: list[dict]) -> dict:
             'model_brier': _mean([_brier(r['model_p'], r['outcome_over']) for r in group]),
         }
 
+    # v2-vs-v1 on identical settled edges (sidecar rows carry v1_model_p).
+    v1_paired = [r for r in rows if r.get('v1_model_p') is not None]
+    diff_vs_v1 = _mean([
+        _brier(r['model_p'], r['outcome_over']) - _brier(r['v1_model_p'], r['outcome_over'])
+        for r in v1_paired
+    ])
+
     return {
         'n_model': n_model,
         'model_brier_all': model_brier_all,
@@ -106,6 +140,8 @@ def score(rows: list[dict]) -> dict:
         'baseline_brier': baseline_brier,
         'diff_vs_consensus': diff_vs_consensus,
         'diff_vs_baseline': diff_vs_baseline,
+        'n_vs_v1': len(v1_paired),
+        'diff_vs_v1': diff_vs_v1,
         'by_stat': by_stat,
         'by_credibility': by_credibility,
     }
@@ -115,11 +151,16 @@ def _fmt(x: float | None, digits: int = 4) -> str:
     return f"{x:.{digits}f}" if x is not None else "n/a"
 
 
-def report(db_path: Path = DB_PATH) -> str:
-    rows = _fetch_rows(db_path)
+def report(db_path: Path = DB_PATH, model: str = 'v1') -> str:
+    if model == 'v1':
+        rows = _fetch_rows(db_path)
+        title = 'Shadow-Model Brier Scorer (FBref model vs market, settled edges)'
+    else:
+        rows = _fetch_sidecar_rows(model, db_path)
+        title = f'Shadow-Model Brier Scorer ({model} sidecar vs market + v1, settled edges)'
     result = score(rows)
 
-    lines = ['Shadow-Model Brier Scorer (FBref model vs market, settled edges)', '']
+    lines = [title, '']
     lines.append(f"Reference: Brier {ALWAYS_50_BRIER} = always saying 50%")
     lines.append('')
     lines.append(f"n scored w/ model_p: {result['n_model']}")
@@ -141,6 +182,14 @@ def report(db_path: Path = DB_PATH) -> str:
     else:
         lines.append('  (no rows with both consensus_p and baseline_p present)')
 
+    if result.get('n_vs_v1'):
+        lines.append('')
+        lines.append(f"Paired vs v1 (edges where both models predicted): n={result['n_vs_v1']}")
+        lines.append(
+            f"  mean paired diff {model}-v1: {_fmt(result['diff_vs_v1'])} "
+            "(negative = v2 better)"
+        )
+
     lines.append('')
     lines.append(f"By stat_type (n >= {MIN_BUCKET_N}):")
     if result['by_stat']:
@@ -161,7 +210,12 @@ def report(db_path: Path = DB_PATH) -> str:
 
 
 def main() -> None:
-    print(report())
+    parser = argparse.ArgumentParser(description='Shadow-model Brier scorer')
+    parser.add_argument('--model', default='v1',
+                        help="'v1' (edges columns) or a sidecar model_name "
+                             "such as 'glm_v2'")
+    args = parser.parse_args()
+    print(report(model=args.model))
 
 
 if __name__ == '__main__':

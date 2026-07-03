@@ -18,7 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from engine.ai_analyst import analyze_play
+from engine.ai_analyst import analyze_play, opponent_from_game
+from engine.glm_model import glm_fields
 from engine.calibration import line_band as calc_line_band
 from engine.calibration import select_sharpest_book
 from engine.consensus import line_matched_consensus
@@ -45,6 +46,7 @@ from storage.db_manager import (
     get_sharp_ladders,
     ingest_staging,
     log_edges,
+    record_model_predictions,
 )
 
 STALE_GAP_MINUTES = 45      # PP capture older than sharp capture by this much
@@ -644,6 +646,9 @@ def find_edges(sync_staging: bool = True):
     )
     _log_names = list(logs_by_player)
     _log_match_cache: dict[str, str | None] = {}
+    # Shadow model v2 (glm_v2): opponent comes from the sharp games map via the
+    # player's team (same pattern price_model_edges uses for kickoffs).
+    _glm_games = get_game_commence_map() if logs_by_player else []
 
     def _logs_for(name: str) -> list[dict]:
         if not logs_by_player:
@@ -712,9 +717,21 @@ def find_edges(sync_staging: bool = True):
 
             # Shadow column: the model's P(over) beside the market number. Base
             # soccer stats only, never combos; missing logs -> NULL. Flags nothing.
+            glm_v2 = None
             if eligible and ' + ' not in pp_name:
                 mf = model_fields(_logs_for(sharp_name), stat_type, pp_line,
                                   evaluation['play'])
+                # Shadow v2 (glm_v2): logged to the model_predictions sidecar,
+                # never into the edges columns. Any failure -> no sidecar row.
+                try:
+                    _, game = _resolve_kickoff(pp_player.get('team'), _glm_games)
+                    glm_v2 = glm_fields(
+                        sharp_name, stat_type, pp_line, evaluation['play'],
+                        logs=_logs_for(sharp_name), logs_by_player=logs_by_player,
+                        opponent=opponent_from_game(game, pp_player.get('team')) or None,
+                    )
+                except Exception:  # noqa: BLE001 - shadow lane never blocks an edge
+                    glm_v2 = None
             else:
                 mf = dict(NULL_FIELDS)
 
@@ -769,6 +786,8 @@ def find_edges(sync_staging: bool = True):
                 'pp_captured_at': pp_player.get('captured_at'),
                 'dk_captured_at': evaluation['sharp_captured_at'],
                 **mf,
+                # Sidecar-only (popped by log flow; not an edges column).
+                'glm_v2': glm_v2,
             })
 
     # --- Model-priced stats (no book market): project from World Cup form ---
@@ -811,7 +830,14 @@ def find_edges(sync_staging: bool = True):
     _apply_ai_gate_batch(yes_bets)
 
     logged = log_edges(flagged_bets)
-    print(f"Logged {logged} edge(s) to SQLite.\n")
+    print(f"Logged {logged} edge(s) to SQLite.")
+    try:  # shadow v2 sidecar: best-effort, never blocks the pipeline
+        glm_logged = record_model_predictions(flagged_bets)
+        if glm_logged:
+            print(f"Logged {glm_logged} glm_v2 shadow prediction(s).")
+    except Exception:  # noqa: BLE001
+        pass
+    print()
 
     print_verdict_board(flagged_bets)
     print_slip_suggestions(flagged_bets)

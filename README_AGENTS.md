@@ -351,6 +351,21 @@ market number, never used to flag a verdict), the line-matched consensus
 gate). All of these are surfaced in the UI and passed into the AI analyst's
 context.
 
+### `model_predictions` — shadow-model sidecar (v2+)
+
+One row per `(edge_id, model_name)` (`UNIQUE` on that pair; `INSERT OR
+IGNORE`, so re-running the matcher keeps the *first* prediction for an open
+edge). Carries the same six fields as v1's `model_*` edge columns (`model_p`,
+`model_p_side`, `model_lambda`, `model_credibility`, `model_n_matches`,
+`model_source`) plus `predicted_at`. v1's edge columns are untouched — every
+additional shadow model is just one more `model_name` here, no schema churn.
+Rows are logged by `record_model_predictions` (best-effort, after
+`log_edges`, re-joined by the open-edge dedup key **plus `commence_time`** —
+the fixture pin stops a recurring line for a player's next match from
+attaching a hindsight-contaminated prediction to a still-open earlier edge)
+and are
+**firewall-side asserted/gated**: logged only, never a verdict input.
+
 ---
 
 ## Command Reference
@@ -366,6 +381,8 @@ context.
 | `python3 scrapers/results_api.py 20260611` | Inspect box scores for a date | None |
 | `python3 scripts/audit_dnp.py --dry-run` | Report already-settled rows a DNP participation gate would VOID (retro; idempotent) | None |
 | `python3 scripts/audit_dnp.py` | Apply that re-grade | None |
+| `python scripts/fit_glm_v2.py` | Rebuild FBref match logs from the soccerdata cache + fit shadow model v2 coefficients | None (FBref via soccerdata, cache-first) |
+| `python engine/shadow_score.py --model glm_v2` | Brier report for the v2 sidecar (vs market + vs v1, same settled edges) | None |
 | `./scripts/dev.sh` | Launch React dashboard + API | None |
 
 ---
@@ -518,4 +535,55 @@ Brier readout — not a gate — that answers the one question the FBref shadow
 model exists for: is `model_p` closer to reality than `consensus_p`/`baseline_p`
 on the same settled edges? Run `python engine/shadow_score.py` any time; its
 headline numbers also get appended (best-effort, non-fatal) to `python
-engine/settlement.py` output after the post-fix record.
+engine/settlement.py` output after the post-fix record. Score a sidecar model
+instead with `python engine/shadow_score.py --model glm_v2` — same metrics on
+the same settled edges, plus a paired v2-vs-v1 mean Brier diff on edges where
+both models predicted.
+
+**Shadow model v2 (`glm_v2`, `engine/glm_model.py`):** a "GLM-lite" Poisson
+regression with exactly three fitted coefficients per stat family
+(shots/SOT/goals/assists/saves, plus tackles/crosses trained for the future):
+
+```
+log λ = log(expected_minutes / 90)      # exposure offset
+      + β0                              # club→tournament level shift
+      + β1 · log(prior90)               # EB pseudo-count player prior
+      + β2 · log(opp)                   # opponent concession multiplier
+```
+
+`prior90` is a gamma-conjugate pseudo-count blend of WC-to-date form, the
+2025-26 club season (capped at 900 minutes of influence; leak-free because the
+season ended pre-tournament), and v1's fallback baseline. `opp` is the
+opponent's concession rate vs the tournament mean, shrunk toward 1.0 (for
+saves the direction flips: keeper workload = opponent SoT *production*).
+β1 < 1 is *fitted* regression-to-the-mean — the one thing v1 asserts by fiat
+(its 270-minute shrinkage constant). P(over) reuses the same push-adjusted
+Poisson tail as v1.
+
+Training: `python scripts/fit_glm_v2.py` (user-run after each matchday)
+re-normalizes `data/processed/fbref_logs.json` from the cached soccerdata
+match pages (cache-first, never refetches), builds strictly-before-date
+training rows (no leakage: a matchday's own stats never feed its own priors),
+IRLS-fits in numpy (ridge τ=1e-3, warm start (log-mean, 1, 1)), prints a
+group-stage/knockout holdout report (Poisson NLL + Brier at synthetic lines
+vs v1's formula on identical rows), and writes 3 floats per family to
+`data/processed/glm_v2_coefs.json` (`fit_through`-stamped; a fit older than
+21 days is treated as missing). Families with < 300 rows (saves) freeze
+β = (0, 1, 1), degrading to "prior × opponent" — still ≥ v1. Club join is by
+normalized name + fuzzy fallback (cached in `glm_v2_club_join.json`); the
+design's FBref-id join was dropped because the cached aggregate JSONs carry
+no ids and re-scraping for them costs requests for marginal coverage.
+
+Inference (`glm_fields`, hooked beside v1 in `find_edges`): loads the coef
+file (mtime-cached), computes the same features from the same code path as
+training, and returns the six model fields for the `model_predictions`
+sidecar — or `None` on *any* missing input (no logs, no coefs, stale fit,
+unknown family). It reads nothing from the market evaluation, never raises,
+and a missing prediction never drops or alters an edge. Promotion beyond
+logging follows the council gauntlet in `docs/COUNCIL_MASTER_SPEC.md`,
+unchanged.
+
+Caveat for attribution: the same fix that gave v2 its training data (real
+per-match stats in `fbref_logs.json`, fixed 2026-07-02) also un-degenerated
+v1's inputs, so compare v2-vs-v1 only on edges logged after that date; the
+honest headline remains each model vs `consensus_p`.

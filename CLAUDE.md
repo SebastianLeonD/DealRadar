@@ -19,6 +19,8 @@ full spec; read it before making pipeline/verdict changes.
 - `engine/config.py` — thresholds (`PLAY_THRESHOLD`, `BREAKEVEN_PROB`,
   `PP_MIN_MINUTES`, `STALE_SETTLE_MAX_HOURS`, `STALE_MAX_MINUTES`).
 - `engine/ai_analyst.py` — Claude second-opinion prompt/context builder.
+- `engine/glm_model.py` + `scripts/fit_glm_v2.py` — shadow model v2 (3-coef
+  Poisson GLM); logs to the `model_predictions` sidecar, never gates verdicts.
 - `storage/db_manager.py` — SQLite schema/migrations, `data/arb_engine.db`.
 - `scripts/audit_dnp.py` — idempotent retro re-grade for the DNP gate.
 - `api/main.py` — FastAPI backend; pipeline endpoints share one lock.

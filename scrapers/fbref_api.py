@@ -24,6 +24,8 @@ live FBref (which this environment's outbound proxy blocks anyway).
 
 from __future__ import annotations
 
+import re
+
 # soccerdata's league id for the men's World Cup (sd.FBref.available_leagues()).
 FBREF_WORLD_CUP_LEAGUE = "INT-World Cup"
 
@@ -32,7 +34,9 @@ FBREF_WORLD_CUP_LEAGUE = "INT-World Cup"
 FBREF_MIN_REQUEST_GAP_SECONDS = 4.0
 
 # FBref column name (lowercased) -> our canonical stat_type. Aliases cover the
-# 'summary' and 'shooting' tables and the occasional header variant.
+# 'summary', 'shooting' and 'keepers' tables and the occasional header variant.
+# soccerdata match tables carry a table-group prefix once flattened
+# ('performance_sh', 'shot stopping_saves'); _canonical_stat() strips it.
 _STAT_ALIASES: dict[str, str] = {
     "sh": "player_shots",
     "shots": "player_shots",
@@ -44,12 +48,48 @@ _STAT_ALIASES: dict[str, str] = {
     "assists": "player_assists",
     "saves": "player_goalie_saves",
     "gk_saves": "player_goalie_saves",
+    "tklw": "player_tackles",
+    "crs": "player_crosses",
 }
+_CANONICAL_STAT_VALUES = set(_STAT_ALIASES.values())
 _MINUTES_ALIASES = ("min", "minutes", "mp")
 _PLAYER_ALIASES = ("player", "name")
 _TEAM_ALIASES = ("team", "squad")
 _OPP_ALIASES = ("opponent", "opp")
 _DATE_ALIASES = ("date", "game_date")
+
+# soccerdata's `game` index level: '2026-06-11 Korea Republic-Czechia'.
+_GAME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\s+(.+)$")
+
+
+def _canonical_stat(key: str) -> str | None:
+    """Map a flattened FBref column to a canonical stat, tolerating the table
+    prefix soccerdata's MultiIndex flatten leaves ('performance_sh' -> 'sh')."""
+    if key in _STAT_ALIASES:
+        return _STAT_ALIASES[key]
+    for candidate in (key.split("_", 1)[-1], key.rsplit("_", 1)[-1]):
+        if candidate in _STAT_ALIASES:
+            return _STAT_ALIASES[candidate]
+    return None
+
+
+def _game_parts(game, team) -> tuple[str | None, str | None]:
+    """(date, opponent) recovered from a soccerdata game string given the
+    player's own team. Returns (None, None) when the format doesn't match."""
+    if not isinstance(game, str):
+        return None, None
+    match = _GAME_RE.match(game.strip())
+    if not match:
+        return None, None
+    date, fixture = match.groups()
+    opponent = None
+    if team:
+        t = str(team)
+        if fixture.startswith(t + "-"):
+            opponent = fixture[len(t) + 1:]
+        elif fixture.endswith("-" + t):
+            opponent = fixture[: -(len(t) + 1)]
+    return date, (opponent or None)
 
 CANONICAL_SOCCER_STATS = (
     "player_shots",
@@ -95,17 +135,34 @@ def normalize_player_match_rows(raw_rows: list[dict]) -> list[dict]:
         stats: dict[str, float] = {}
         lowered = {str(k).lower(): v for k, v in row.items()}
         for col, value in lowered.items():
-            canon = _STAT_ALIASES.get(col)
+            canon = _canonical_stat(col)
             if canon is None:
                 continue
             f = _to_float(value)
             if f is not None:
                 stats[canon] = f
+        # Already-normalized cached records carry a nested stats dict; pass it
+        # through so re-normalizing the JSON cache is lossless.
+        nested = row.get("stats")
+        if isinstance(nested, dict):
+            for key, value in nested.items():
+                if key in _CANONICAL_STAT_VALUES:
+                    f = _to_float(value)
+                    if f is not None:
+                        stats[key] = f
+        team = _first(row, _TEAM_ALIASES) or None
+        opponent = _first(row, _OPP_ALIASES) or None
+        date = _first(row, _DATE_ALIASES) or None
+        if date is None or opponent is None:
+            # soccerdata match frames bury date/opponent in the 'game' level.
+            game_date, game_opp = _game_parts(lowered.get("game"), team)
+            date = date or game_date
+            opponent = opponent or game_opp
         records.append({
             "player": str(player),
-            "team": (_first(row, _TEAM_ALIASES) or None),
-            "opponent": (_first(row, _OPP_ALIASES) or None),
-            "date": (_first(row, _DATE_ALIASES) or None),
+            "team": team,
+            "opponent": opponent,
+            "date": date,
             "minutes": minutes,
             "stats": stats,
         })
