@@ -331,6 +331,8 @@ export const api = {
     request<PipelineResult>("/pipeline/fetch-form", { method: "POST" }),
   fetchUnderdog: () =>
     request<PipelineResult>("/pipeline/fetch-underdog", { method: "POST" }),
+  fetchPinnacle: () =>
+    request<PipelineResult>("/pipeline/fetch-pinnacle", { method: "POST" }),
   runMatcher: () =>
     request<PipelineResult>("/pipeline/run-matcher", { method: "POST" }),
   runFull: () =>

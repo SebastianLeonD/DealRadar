@@ -142,6 +142,13 @@ def pipeline_fetch_underdog():
     return {"success": success, "output": output or "Underdog board updated."}
 
 
+@app.post("/api/pipeline/fetch-pinnacle")
+@_pipeline_locked
+def pipeline_fetch_pinnacle():
+    success, output = run_script("scrapers/pinnacle_api.py")
+    return {"success": success, "output": output or "Pinnacle lines updated."}
+
+
 @app.post("/api/pipeline/settle")
 @_pipeline_locked
 def pipeline_settle():

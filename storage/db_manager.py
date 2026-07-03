@@ -8,6 +8,8 @@ DK_STAGING_FILE = Path('data/processed/draftkings_data.json')
 PP_STAGING_FILE = Path('data/processed/live.json')
 # Underdog's de-vigged board, same shape as DK — ingested as another book.
 UD_STAGING_FILE = Path('data/processed/underdog_sharp.json')
+# Pinnacle's de-vigged anytime-goalscorer board, same shape — a sharp book.
+PINNACLE_STAGING_FILE = Path('data/processed/pinnacle_sharp.json')
 
 TABLES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS props (
@@ -63,6 +65,23 @@ CREATE TABLE IF NOT EXISTS edges (
     flagged_at TEXT NOT NULL,
     pp_captured_at TEXT,
     dk_captured_at TEXT
+);
+
+-- Shadow-model sidecar (v2+): one prediction row per (edge, model), logged
+-- beside — never inside — the edges table. v1's model_* edge columns are
+-- untouched; every additional shadow model is one more model_name here.
+-- Firewall: asserted_gated — rows are logged only, never gate a verdict.
+CREATE TABLE IF NOT EXISTS model_predictions (
+    edge_id INTEGER NOT NULL,
+    model_name TEXT NOT NULL,
+    model_p REAL,
+    model_p_side REAL,
+    model_lambda REAL,
+    model_credibility REAL,
+    model_n_matches INTEGER,
+    model_source TEXT,
+    predicted_at TEXT NOT NULL,
+    UNIQUE(edge_id, model_name)
 );
 
 CREATE TABLE IF NOT EXISTS bets (
@@ -350,11 +369,16 @@ def ingest_draftkings(
     if isinstance(payload, dict):
         records = payload.get('records', [])
         fetch_complete = payload.get('fetch_complete', True)
+        # Fetch time recorded by the scraper (pinnacle). Stamping captured_at
+        # with it keeps a re-ingested stale file honestly stale, so the
+        # matcher's cross-book staleness guard can drop it.
+        fetched_at = payload.get('fetched_at')
     else:
         records = payload
+        fetched_at = None
         fetch_complete = True
 
-    timestamp = captured_at or utc_now()
+    timestamp = captured_at or fetched_at or utc_now()
     count = 0
 
     init_db(db_path)
@@ -431,6 +455,7 @@ def ingest_staging(
     dk_path: Path = DK_STAGING_FILE,
     pp_path: Path = PP_STAGING_FILE,
     ud_path: Path = UD_STAGING_FILE,
+    pinnacle_path: Path = PINNACLE_STAGING_FILE,
 ) -> dict[str, int]:
     init_db(db_path)
     results = {}
@@ -440,6 +465,9 @@ def ingest_staging(
     if ud_path.exists():
         # Same loader/shape as DK; records carry Bookmaker='underdog'.
         results['underdog'] = ingest_draftkings(ud_path, db_path)
+    if pinnacle_path.exists():
+        # Same loader/shape as DK; records carry Bookmaker='pinnacle'.
+        results['pinnacle'] = ingest_draftkings(pinnacle_path, db_path)
     if pp_path.exists():
         results['pp'] = ingest_prizepicks(pp_path, db_path)
 
@@ -485,13 +513,25 @@ def get_sharp_ladders(
     Each bookmaker entry holds every alternate line from its latest scrape:
     {'points': [(line, p_over), ...], 'captured_at': ..., 'commence_time': ...}
     """
+    from engine.name_matcher import match_player_name, normalize_name
+
     rows = get_latest_props('DK', stat_type, db_path)
     ladders: dict[str, dict[str, dict]] = {}
+    # Books outside the Odds-API feed (Pinnacle) spell names differently
+    # ('Anis Hadj-Moussa', 'Riyhad Mahrez'), so keying ladders on the raw
+    # string would fork them out of consensus. Resolve each new spelling to
+    # an existing ladder key via the same normalizer/fuzzy matcher used for
+    # PP names; first spelling seen becomes canonical.
+    canonical: dict[str, str] = {}
 
     for row in rows:
         if row['true_over_prob'] is None:
             continue
-        book_entry = ladders.setdefault(row['player_name'], {}).setdefault(
+        norm = normalize_name(row['player_name'])
+        if norm not in canonical:
+            matched, _ = match_player_name(row['player_name'], list(ladders.keys()))
+            canonical[norm] = matched or row['player_name']
+        book_entry = ladders.setdefault(canonical[norm], {}).setdefault(
             row['bookmaker'],
             {
                 'points': [], 'captured_at': row['captured_at'],
@@ -609,6 +649,68 @@ def log_edges(
             )
         connection.commit()
 
+    return inserted
+
+
+def record_model_predictions(
+    bets: list[dict],
+    db_path: Path = DB_PATH,
+    model_name: str = 'glm_v2',
+    field_key: str = 'glm_v2',
+) -> int:
+    """Attach shadow-v2 predictions to their edges in the sidecar table.
+
+    Each bet carrying a `field_key` dict (the six model fields) is re-joined to
+    its open edge row by the same dedup key log_edges uses (player/stat/play/
+    line, result IS NULL) plus commence_time — log_edges doesn't return rowids,
+    and the re-select is the smaller diff. The commence_time match (null-safe
+    IS) pins the prediction to the same fixture: a recurring line for a
+    player's NEXT match must never attach to a still-open edge from an earlier
+    match, whose features could already contain that match's own stats
+    (hindsight leak into the shadow Brier). INSERT OR IGNORE on
+    UNIQUE(edge_id, model_name) keeps the FIRST prediction for an edge, so
+    re-running the matcher against an already-open edge never overwrites the
+    original number.
+    """
+    preds = [bet for bet in bets if isinstance(bet.get(field_key), dict)]
+    if not preds:
+        return 0
+
+    init_db(db_path)
+    timestamp = utc_now()
+    inserted = 0
+    with get_connection(db_path) as connection:
+        for bet in preds:
+            row = connection.execute(
+                """
+                SELECT id FROM edges
+                WHERE pp_player_name = ? AND stat_type = ? AND play = ?
+                  AND pp_line = ? AND commence_time IS ? AND result IS NULL
+                ORDER BY id DESC LIMIT 1
+                """,
+                (bet['pp_player_name'], bet['stat_type'], bet['play'],
+                 bet['pp_line'], bet.get('commence_time')),
+            ).fetchone()
+            if not row:
+                continue
+            fields = bet[field_key]
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO model_predictions (
+                    edge_id, model_name, model_p, model_p_side, model_lambda,
+                    model_credibility, model_n_matches, model_source, predicted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row['id'], model_name,
+                    fields.get('model_p'), fields.get('model_p_side'),
+                    fields.get('model_lambda'), fields.get('model_credibility'),
+                    fields.get('model_n_matches'), fields.get('model_source'),
+                    timestamp,
+                ),
+            )
+            inserted += cursor.rowcount
+        connection.commit()
     return inserted
 
 

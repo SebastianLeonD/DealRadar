@@ -8,6 +8,7 @@ type ActionKey =
   | "parse_pp"
   | "fetch_form"
   | "fetch_underdog"
+  | "fetch_pinnacle"
   | "run_matcher"
   | "run_full"
   | "settle_results";
@@ -36,6 +37,11 @@ const STEPS: {
     key: "fetch_underdog",
     title: "Update Underdog lines (optional)",
     body: "Pulls Underdog Fantasy's board directly (free, no paste) and shows its line next to each PrizePicks prop on the PrizePicks Board tab — so you can take the softer side. Re-run close to kickoff.",
+  },
+  {
+    key: "fetch_pinnacle",
+    title: "Update Pinnacle lines (optional)",
+    body: "Pulls Pinnacle — the sharpest book in the world — goalscorer odds free, giving goal props a second sharp book at the same line so they can reach YES. Re-run close to kickoff.",
   },
   {
     key: "run_matcher",
@@ -76,6 +82,7 @@ const RUNNING_LABEL: Record<ActionKey, string> = {
   parse_pp: "Read your PrizePicks board",
   fetch_form: "Update World Cup form",
   fetch_underdog: "Update Underdog lines",
+  fetch_pinnacle: "Update Pinnacle lines",
   run_matcher: "Find the picks",
   run_full: "Run everything",
   settle_results: "Grade results",
@@ -129,6 +136,9 @@ export function ExecutionPage() {
           break;
         case "fetch_underdog":
           result = await api.fetchUnderdog();
+          break;
+        case "fetch_pinnacle":
+          result = await api.fetchPinnacle();
           break;
         case "run_matcher":
           result = await api.runMatcher();

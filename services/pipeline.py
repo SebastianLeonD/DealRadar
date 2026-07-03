@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from engine.ai_analyst import opponent_from_game
 from engine.clv_report import build_clv_rows
 from engine.matcher import find_edges
+from engine.sports import active_sport_key
 from storage.db_manager import get_connection, get_player_game_map, init_db, ingest_staging
 
 FRESHNESS_MINUTES = 5
@@ -77,6 +78,17 @@ ACTION_CATALOG = {
         ),
         "api_calls": "None billed — Underdog's lines endpoint is public JSON",
         "writes_to": "data/processed/underdog_data.json",
+    },
+    "fetch_pinnacle": {
+        "title": "Update Pinnacle Lines",
+        "command": "python3 scrapers/pinnacle_api.py",
+        "description": (
+            "Pulls Pinnacle — the sharpest book in the world — goalscorer odds "
+            "free (no key), giving goal props a second sharp book at the same "
+            "line so they can reach YES."
+        ),
+        "api_calls": "None billed — Pinnacle's odds endpoint is public JSON",
+        "writes_to": "data/processed/pinnacle_sharp.json",
     },
     "run_matcher": {
         "title": "Run Edge Detection",
@@ -343,6 +355,13 @@ def run_full_pipeline() -> tuple[bool, str]:
     messages.append(output or "PrizePicks parse finished.")
     if not success:
         return False, "\n".join(messages)
+
+    # Pinnacle is a World Cup-only connector and non-fatal: on failure the
+    # previous staging file keeps its own fetched_at stamp, so a stale board
+    # can never re-enter consensus looking fresh.
+    if active_sport_key() == "world_cup":
+        _, output = run_script("scrapers/pinnacle_api.py")
+        messages.append(output or "Pinnacle fetch finished.")
 
     ingest_results = ingest_staging()
     messages.append(f"Synced staging JSON to SQLite: {ingest_results}")
