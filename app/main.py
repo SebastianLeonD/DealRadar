@@ -12,14 +12,12 @@ import contextlib
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from app import categorize, db, notify, sources
 
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 REFRESH_MINUTES = float(os.environ.get("DEALRADAR_REFRESH_MINUTES", "15"))
 
 _last_refresh: dict = {"at": None, "result": None}
@@ -75,12 +73,20 @@ async def lifespan(_: FastAPI):
         await task
 
 
-app = FastAPI(title="DealRadar", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="DealRadar API", version="0.3.0", lifespan=lifespan)
+
+# The UI is a separate React app (frontend/) — this service is API-only.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/")
 def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return {"service": "DealRadar API", "ui": "run the React app in frontend/ (npm run dev)"}
 
 
 @app.get("/api/deals")

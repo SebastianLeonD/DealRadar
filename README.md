@@ -26,31 +26,41 @@ Discord channel via webhook — exactly the workflow the paid groups charge for.
    instantly. If you set `ANTHROPIC_API_KEY`, Claude additionally scores each
    deal 1–10 and writes a one-line take ("solid all-time-low on a good TV" vs
    "fake discount, ignore").
-4. **Serves a storefront-style dashboard** — `http://localhost:8000` renders a
-   shopping-site product grid: image cards with price + AI-score badges, and
-   clicking any deal opens a detail view with the full-size product image,
-   store, category, the AI verdict, and an "Open deal" link to the source.
-   Product images are pulled straight from the feeds (Slickdeals thumbnails,
-   Reddit preview images). Filters — category chips, item-type chips (Jeans,
-   Shorts, Hoodie, Sneaker, ...), store dropdown, max-price box, freshness
-   window, and free-text search — are all combinable.
+4. **React storefront** — `frontend/` is a Vite + React app (ASOS-style
+   design): black header with search, dark category nav with a red Hot tag,
+   portrait product grid with image cards, price + AI-score badges, and a
+   click-to-open detail modal with the full-size image, AI verdict, and an
+   "Open deal" link. Product images come straight from the feeds (Slickdeals
+   thumbnails, Reddit preview images). Filters — category tabs, item chips
+   (Jeans, Shorts, Hoodie, Sneaker, ...), store dropdown, max-price box,
+   freshness window, and search — are all combinable. The Python service is
+   API-only.
 5. **Posts to Discord (optional)** — set `DISCORD_WEBHOOK_URL` and hit the
    "Post top deals" button (or `POST /api/notify`) to push the best current
    deals into your own server, formatted like the paid groups do it.
 
 ## Quick start
 
+Two pieces: a **Python API** (aggregation, storage, AI scoring) and a
+**React frontend** (all the UI — no Python-served pages).
+
 ```bash
+# 1) API (terminal one)
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env               # optional: keys for AI scoring / Discord
+uvicorn app.main:app --reload      # http://localhost:8000 (JSON only)
 
-cp .env.example .env        # optional: add keys for AI scoring / Discord
-
-uvicorn app.main:app --reload
+# 2) React frontend (terminal two)
+cd frontend
+npm install
+npm run dev                        # http://localhost:5173
 ```
 
-Open http://localhost:8000 and click **Refresh deals** to pull the latest.
+Open http://localhost:5173 — the Vite dev server proxies `/api/*` to the
+backend, so there's nothing else to configure. For production, `npm run
+build` and serve `frontend/dist/` from any static host.
 
 ## Configuration (all optional)
 
@@ -89,14 +99,18 @@ from the deal's link domain first, falling back to the title.
 ## Project layout
 
 ```
-app/
-  main.py        FastAPI app + API routes, serves the dashboard
-  sources.py     Feed fetchers (Slickdeals + Reddit, RSS/Atom)
-  categorize.py  Keyword categorizer + optional Claude scoring
-  db.py          SQLite storage (data/dealradar.db, auto-created)
-  notify.py      Discord webhook poster
-static/
-  index.html     The dashboard (self-contained, no build step)
+app/                     Python API service (no UI)
+  main.py                FastAPI routes + background feed refresher
+  sources.py             Feed fetchers (Slickdeals + Reddit, RSS/Atom)
+  categorize.py          Keyword categorizer + optional Claude scoring
+  db.py                  SQLite storage (data/dealradar.db, auto-created)
+  notify.py              Discord webhook poster
+frontend/                React app (Vite)
+  src/App.jsx            State, data loading, 60s live polling
+  src/api.js             API client helpers
+  src/styles.css         The ASOS-style design system
+  src/components/        TopBar, SubNav, Banners, FilterBar,
+                         DealGrid, DealCard, DealModal
 ```
 
 ## Roadmap ideas
