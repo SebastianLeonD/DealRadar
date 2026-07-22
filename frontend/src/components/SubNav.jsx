@@ -1,24 +1,28 @@
 export default function SubNav({ categories, activeCategory, saleMode, onCategory, onToggleSale }) {
   return (
-    <div className="subnav">
-      <div
-        className={`navitem trend ${!saleMode && activeCategory === "All" ? "active" : ""}`}
-        onClick={() => onCategory("All")}
-      >
-        Trending
-      </div>
-      {categories.map((c) => (
-        <div
-          key={c.category}
-          className={`navitem ${!saleMode && c.category === activeCategory ? "active" : ""}`}
-          onClick={() => onCategory(c.category)}
+    <nav className="subnav">
+      <div className="navrail">
+        <button
+          className={`navpill ${!saleMode && activeCategory === "All" ? "active" : ""}`}
+          onClick={() => onCategory("All")}
         >
-          {c.category}
-        </div>
-      ))}
-      <div className={`navitem sale ${saleMode ? "active" : ""}`} onClick={onToggleSale}>
-        Hot 🔥
+          All deals
+        </button>
+        {categories.map((c) => (
+          <button
+            key={c.category}
+            className={`navpill ${!saleMode && c.category === activeCategory ? "active" : ""}`}
+            onClick={() => onCategory(c.category)}
+          >
+            {c.category}
+            <span className="navcount">{c.n}</span>
+          </button>
+        ))}
+        <span className="navdivider" aria-hidden="true" />
+        <button className={`navpill hot ${saleMode ? "active" : ""}`} onClick={onToggleSale}>
+          🔥 Hot right now
+        </button>
       </div>
-    </div>
+    </nav>
   );
 }

@@ -1,25 +1,29 @@
 export default function TopBar({ query, onQuery, onRefresh, onNotify, refreshing }) {
   return (
-    <div className="topbar">
-      <div className="logo">dealradar</div>
-      <div className="tab">DEALS</div>
+    <header className="topbar">
+      <div className="brand">
+        <div className="logo">
+          deal<span>radar</span><i className="ping" aria-hidden="true" />
+        </div>
+        <div className="tagline">live deals, curated by AI</div>
+      </div>
       <div className="searchwrap">
         <div className="searchbox">
+          <span className="mag">⌕</span>
           <input
             type="search"
-            placeholder="Search for deals, items and brands"
+            placeholder="Search deals, items and brands"
             value={query}
             onChange={(e) => onQuery(e.target.value)}
           />
-          <span className="mag">⌕</span>
         </div>
       </div>
-      <button className="iconbtn" title="Refresh deals now" onClick={onRefresh} disabled={refreshing}>
-        ⟳
+      <button className="actionbtn" onClick={onRefresh} disabled={refreshing} title="Refresh deals now">
+        ⟳ {refreshing ? "Refreshing…" : "Refresh"}
       </button>
-      <button className="iconbtn" title="Post top 5 deals to Discord" onClick={onNotify}>
-        🖈
+      <button className="actionbtn ghost" onClick={onNotify} title="Post top 5 deals to Discord">
+        Post to Discord
       </button>
-    </div>
+    </header>
   );
 }
