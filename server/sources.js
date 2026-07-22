@@ -1,5 +1,14 @@
 // Deal feed fetchers. All sources are free public RSS/Atom feeds — no API keys.
 import Parser from "rss-parser";
+import { SCRAPERS } from "./scrapers.js";
+
+// Per-store Slickdeals search feeds cover retailers whose own sites block
+// server-side requests (Akamai 403): Hollister, PacSun, ASOS — plus Amazon,
+// where Slickdeals' human curation beats scraping anyway.
+const sdSearch = (q) => ({
+  name: `slickdeals:${q}`,
+  url: `https://slickdeals.net/newsearch.php?q=${encodeURIComponent(q)}&searcharea=deals&searchin=first&rss=1`,
+});
 
 export const FEEDS = [
   {
@@ -11,6 +20,16 @@ export const FEEDS = [
   { name: "r/frugalmalefashion", url: "https://www.reddit.com/r/frugalmalefashion/.rss" },
   { name: "r/FrugalFemaleFashion", url: "https://www.reddit.com/r/FrugalFemaleFashion/.rss" },
   { name: "r/GameDeals", url: "https://www.reddit.com/r/GameDeals/.rss" },
+  sdSearch("hollister"),
+  sdSearch("pacsun"),
+  sdSearch("asos"),
+  sdSearch("amazon"),
+];
+
+/** Every source — RSS feeds and direct retailer scrapers — as {name, fetch}. */
+export const ALL_SOURCES = [
+  ...FEEDS.map((f) => ({ name: f.name, fetch: () => fetchFeed(f.name, f.url) })),
+  ...SCRAPERS,
 ];
 
 const parser = new Parser({
@@ -71,15 +90,26 @@ export async function fetchFeed(name, url) {
   return deals;
 }
 
-/** Fetch every configured feed. Returns {deals, errors} — one source failing
-    never blocks the rest. */
+/** Fetch every source (feeds + scrapers). Returns {deals, errors, health} —
+    one source failing never blocks the rest; health has a row per source. */
 export async function fetchAll() {
-  const results = await Promise.allSettled(FEEDS.map((f) => fetchFeed(f.name, f.url)));
   const deals = [];
   const errors = [];
-  results.forEach((r, i) => {
-    if (r.status === "fulfilled") deals.push(...r.value);
-    else errors.push(`${FEEDS[i].name}: ${r.reason?.message ?? r.reason}`);
-  });
-  return { deals, errors };
+  const health = [];
+  await Promise.all(
+    ALL_SOURCES.map(async (s) => {
+      const started = Date.now();
+      try {
+        const d = await s.fetch();
+        deals.push(...d);
+        health.push({ source: s.name, ok: true, count: d.length, ms: Date.now() - started });
+      } catch (e) {
+        const error = String(e?.message ?? e);
+        errors.push(`${s.name}: ${error}`);
+        health.push({ source: s.name, ok: false, count: 0, error, ms: Date.now() - started });
+      }
+    })
+  );
+  health.sort((a, b) => a.source.localeCompare(b.source));
+  return { deals, errors, health };
 }

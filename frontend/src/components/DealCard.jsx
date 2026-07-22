@@ -1,10 +1,17 @@
 import { useState } from "react";
 import { scoreClass, timeAgo } from "../api.js";
 
-export function Thumb({ deal, big = false }) {
+export function Thumb({ deal, big = false, eager = false }) {
   const [broken, setBroken] = useState(false);
   if (!deal.image_url || broken) return <div className="noimg">◻</div>;
-  return <img src={deal.image_url} alt="" loading={big ? undefined : "lazy"} onError={() => setBroken(true)} />;
+  return (
+    <img
+      src={deal.image_url}
+      alt=""
+      loading={big || eager ? undefined : "lazy"}
+      onError={() => setBroken(true)}
+    />
+  );
 }
 
 export default function DealCard({ deal, index, onOpen }) {
@@ -15,7 +22,7 @@ export default function DealCard({ deal, index, onOpen }) {
       style={{ animationDelay: `${Math.min(index * 45, 500)}ms` }}
     >
       <div className="imgbox">
-        <Thumb deal={deal} />
+        <Thumb deal={deal} eager={index < 10} />
         {deal.ai_score ? (
           <div className={`scorebadge ${scoreClass(deal.ai_score)}`}>★ {deal.ai_score}</div>
         ) : null}

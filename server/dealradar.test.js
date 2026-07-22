@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { categorize, detectStore, extractPrice } from "./categorize.js";
 import * as db from "./db.js";
+import { mapHM, mapZara } from "./scrapers.js";
 import { entryImage } from "./sources.js";
 
 describe("categorize", () => {
@@ -90,6 +91,50 @@ describe("entryImage", () => {
 </channel></rss>`;
     const feed = await parser.parseString(rss);
     expect(entryImage(feed.items[0])).toBeNull();
+  });
+});
+
+describe("scraper mappers", () => {
+  it("maps Zara products, biggest discount first", () => {
+    const data = {
+      productGroups: [{
+        elements: [{
+          commercialComponents: [
+            { name: "BOMBER JACKET", price: 1548, oldPrice: 12900, displayDiscountPercentage: 88,
+              seo: { keyword: "bomber-jacket", seoProductId: "02969241" },
+              xmedia: [{ extraInfo: { deliveryUrl: "https://static.zara.net/x.jpg" } }] },
+            { name: "PLAIN TEE", price: 990, oldPrice: 1990, displayDiscountPercentage: 50,
+              seo: { keyword: "plain-tee", seoProductId: "111" } },
+            { name: "NO PRICE, SKIPPED", seo: { keyword: "x", seoProductId: "2" } },
+          ],
+        }],
+      }],
+    };
+    const deals = mapZara(data);
+    expect(deals).toHaveLength(2);
+    expect(deals[0].title).toBe("BOMBER JACKET — $15.48 (was $129, 88% off)");
+    expect(deals[0].url).toBe("https://www.zara.com/us/en/bomber-jacket-p02969241.html");
+    expect(deals[0].image_url).toBe("https://static.zara.net/x.jpg?w=560");
+    expect(extractPrice(deals[0].title)).toBe(15.48);
+    expect(detectStore(deals[0].title, deals[0].url)).toBe("Zara");
+  });
+
+  it("maps H&M sale items and skips full-price ones", () => {
+    const data = {
+      searchHits: {
+        productList: [
+          { productName: "Ruffle Dress", url: "/en_us/productpage.1.html", productImage: "https://image.hm.com/a.jpg",
+            prices: [{ priceType: "redPrice", price: 3.99 }, { priceType: "whitePrice", price: 9.99 }] },
+          { productName: "Full Price Dress", url: "/en_us/productpage.2.html",
+            prices: [{ priceType: "whitePrice", price: 19.99 }] },
+        ],
+      },
+    };
+    const deals = mapHM(data);
+    expect(deals).toHaveLength(1);
+    expect(deals[0].title).toBe("Ruffle Dress — $3.99 (was $9.99, 60% off)");
+    expect(deals[0].url).toBe("https://www2.hm.com/en_us/productpage.1.html");
+    expect(detectStore(deals[0].title, deals[0].url)).toBe("H&M");
   });
 });
 

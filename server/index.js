@@ -21,10 +21,11 @@ const PORT = Number(process.env.PORT || 8000);
 const REFRESH_MINUTES = Number(process.env.DEALRADAR_REFRESH_MINUTES || 15);
 
 const lastRefresh = { at: null, result: null };
+const refreshLog = []; // newest first, last 20 refreshes, in-memory
 
 /** Fetch all feeds, store new deals, categorize, and (if enabled) AI-score them. */
 export async function runRefresh() {
-  const { deals, errors } = await sources.fetchAll();
+  const { deals, errors, health } = await sources.fetchAll();
   for (const d of deals) {
     d.category = categorize.categorize(d.title);
     d.store = categorize.detectStore(d.title, d.url);
@@ -47,14 +48,18 @@ export async function runRefresh() {
   }
 
   const result = {
+    at: new Date().toISOString(),
     fetched: deals.length,
     new: added,
     ai_scored: scored,
     ai_error: aiError,
     source_errors: errors,
+    sources: health,
   };
-  lastRefresh.at = new Date().toISOString();
+  lastRefresh.at = result.at;
   lastRefresh.result = result;
+  refreshLog.unshift(result);
+  if (refreshLog.length > 20) refreshLog.pop();
   return result;
 }
 
@@ -85,10 +90,11 @@ app.get("/api/status", (_req, res) => {
   res.json({
     ai_enabled: categorize.aiAvailable(),
     discord_enabled: notify.webhookConfigured(),
-    sources: sources.FEEDS.map((f) => f.name),
+    sources: sources.ALL_SOURCES.map((s) => s.name),
     auto_refresh_minutes: REFRESH_MINUTES,
     last_refresh_at: lastRefresh.at,
     last_refresh: lastRefresh.result,
+    refresh_log: refreshLog,
   });
 });
 

@@ -5,6 +5,7 @@ import {
 import DealGrid from "./components/DealGrid.jsx";
 import DealModal from "./components/DealModal.jsx";
 import FilterBar from "./components/FilterBar.jsx";
+import SourceLog from "./components/SourceLog.jsx";
 import SubNav from "./components/SubNav.jsx";
 import Ticker from "./components/Ticker.jsx";
 import TopBar from "./components/TopBar.jsx";
@@ -120,6 +121,7 @@ export default function App() {
           </span>
         </div>
         <FilterBar filters={filters} stores={stores} saleMode={saleMode} onChange={patchFilters} />
+        <SourceLog status={status} />
         <DealGrid deals={deals} loading={loading} onOpen={setOpenIndex} />
       </div>
       <DealModal deal={openIndex != null ? deals[openIndex] : null} onClose={() => setOpenIndex(null)} />
