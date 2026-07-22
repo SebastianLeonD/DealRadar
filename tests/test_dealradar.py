@@ -1,4 +1,54 @@
-from app import categorize, db
+import feedparser
+
+from app import categorize, db, sources
+
+REDDIT_STYLE_ATOM = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+  <entry>
+    <title>Nike Killshot 2 $63.71</title>
+    <link href="https://www.reddit.com/r/frugalmalefashion/comments/abc/x/"/>
+    <updated>2099-01-01T00:00:00+00:00</updated>
+    <media:thumbnail url="https://external-preview.redd.it/killshot.jpg?width=640&amp;s=tok"/>
+  </entry>
+</feed>"""
+
+SLICKDEALS_STYLE_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Slickdeals</title>
+  <item>
+    <title>LG C4 65\" OLED TV $1,299.99</title>
+    <link>https://slickdeals.net/f/123-lg-c4</link>
+    <pubDate>Mon, 01 Jan 2099 00:00:00 GMT</pubDate>
+    <description>&lt;img src="https://static.slickdealscdn.com/attachment/lgc4.jpg" /&gt; great TV deal</description>
+  </item>
+</channel></rss>"""
+
+NO_IMAGE_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>x</title>
+  <item><title>Plain deal $5</title><link>https://x.test/plain</link>
+  <description>no picture here</description></item>
+</channel></rss>"""
+
+
+def test_entry_image_media_thumbnail():
+    entry = feedparser.parse(REDDIT_STYLE_ATOM).entries[0]
+    assert sources._entry_image(entry) == "https://external-preview.redd.it/killshot.jpg?width=640&s=tok"
+
+
+def test_entry_image_from_html_description():
+    entry = feedparser.parse(SLICKDEALS_STYLE_RSS).entries[0]
+    assert sources._entry_image(entry) == "https://static.slickdealscdn.com/attachment/lgc4.jpg"
+
+
+def test_entry_image_absent():
+    entry = feedparser.parse(NO_IMAGE_RSS).entries[0]
+    assert sources._entry_image(entry) is None
+
+
+def test_db_stores_image_url(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
+    db.upsert_deals([{"title": "x $5", "url": "https://x.test/i", "source": "t",
+                      "category": "Other", "image_url": "https://img.test/a.jpg"}])
+    assert db.list_deals()[0]["image_url"] == "https://img.test/a.jpg"
 
 
 def test_categorize_tech():

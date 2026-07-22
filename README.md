@@ -26,9 +26,14 @@ Discord channel via webhook — exactly the workflow the paid groups charge for.
    instantly. If you set `ANTHROPIC_API_KEY`, Claude additionally scores each
    deal 1–10 and writes a one-line take ("solid all-time-low on a good TV" vs
    "fake discount, ignore").
-4. **Serves a dashboard** — browse at `http://localhost:8000`: category chips,
-   item-type chips (Jeans, Shorts, Hoodie, Sneaker, ...), store dropdown,
-   max-price box, and free-text search — all combinable.
+4. **Serves a storefront-style dashboard** — `http://localhost:8000` renders a
+   shopping-site product grid: image cards with price + AI-score badges, and
+   clicking any deal opens a detail view with the full-size product image,
+   store, category, the AI verdict, and an "Open deal" link to the source.
+   Product images are pulled straight from the feeds (Slickdeals thumbnails,
+   Reddit preview images). Filters — category chips, item-type chips (Jeans,
+   Shorts, Hoodie, Sneaker, ...), store dropdown, max-price box, freshness
+   window, and free-text search — are all combinable.
 5. **Posts to Discord (optional)** — set `DISCORD_WEBHOOK_URL` and hit the
    "Post top deals" button (or `POST /api/notify`) to push the best current
    deals into your own server, formatted like the paid groups do it.

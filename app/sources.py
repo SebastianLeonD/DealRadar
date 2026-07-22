@@ -1,6 +1,8 @@
 """Deal feed fetchers. All sources are free public RSS/Atom feeds — no API keys."""
 
+import re
 import time
+from html import unescape
 
 import feedparser
 import httpx
@@ -18,6 +20,34 @@ FEEDS = [
 ]
 
 HEADERS = {"User-Agent": "DealRadar/0.1 (personal deal aggregator)"}
+
+
+_IMG_RE = re.compile(r"<img[^>]+src=[\"']([^\"']+)[\"']", re.IGNORECASE)
+
+
+def _entry_image(entry) -> str | None:
+    """Best product image for a feed entry.
+
+    Reddit Atom feeds expose media:thumbnail / media:content; Slickdeals (and
+    Reddit link posts) embed an <img> inside the entry's HTML body.
+    """
+    for key in ("media_thumbnail", "media_content"):
+        for item in getattr(entry, key, None) or []:
+            url = item.get("url")
+            if url and url.startswith("http"):
+                return unescape(url)
+
+    html_parts = [getattr(entry, "summary", "") or ""]
+    for content in getattr(entry, "content", None) or []:
+        html_parts.append(content.get("value", "") if isinstance(content, dict)
+                          else getattr(content, "value", ""))
+    for html in html_parts:
+        match = _IMG_RE.search(html)
+        if match:
+            url = unescape(match.group(1))
+            if url.startswith("http"):
+                return url
+    return None
 
 
 def _entry_posted_at(entry) -> str | None:
@@ -42,6 +72,7 @@ def fetch_feed(name: str, url: str, timeout: float = 15.0) -> list[dict]:
             "title": title,
             "url": link,
             "source": name,
+            "image_url": _entry_image(entry),
             "posted_at": _entry_posted_at(entry),
         })
     return deals

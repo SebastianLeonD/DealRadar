@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS deals (
     category    TEXT NOT NULL DEFAULT 'Other',
     store       TEXT,                      -- retailer: Amazon, Zara, ASOS, ...
     price       REAL,                      -- extracted from title, NULL if none found
+    image_url   TEXT,                      -- product image from the feed, if any
     posted_at   TEXT,                      -- ISO timestamp from the feed, if any
     fetched_at  TEXT NOT NULL DEFAULT (datetime('now')),
     ai_score    INTEGER,                   -- 1-10, NULL until Claude scores it
@@ -25,7 +26,7 @@ CREATE INDEX IF NOT EXISTS idx_deals_fetched ON deals(fetched_at);
 """
 
 # Columns added after the first release — applied to pre-existing DBs on connect.
-_MIGRATION_COLUMNS = {"store": "TEXT", "price": "REAL"}
+_MIGRATION_COLUMNS = {"store": "TEXT", "price": "REAL", "image_url": "TEXT"}
 
 
 def deal_id(url: str) -> str:
@@ -51,11 +52,11 @@ def upsert_deals(deals: list[dict]) -> int:
         for d in deals:
             cur = conn.execute(
                 """INSERT OR IGNORE INTO deals
-                   (id, title, url, source, category, store, price, posted_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (id, title, url, source, category, store, price, image_url, posted_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (deal_id(d["url"]), d["title"], d["url"], d["source"],
                  d.get("category", "Other"), d.get("store"), d.get("price"),
-                 d.get("posted_at")),
+                 d.get("image_url"), d.get("posted_at")),
             )
             new += cur.rowcount
     return new
