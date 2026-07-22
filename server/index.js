@@ -27,9 +27,10 @@ const refreshLog = []; // newest first, last 20 refreshes, in-memory
 export async function runRefresh() {
   const { deals, errors, health } = await sources.fetchAll();
   for (const d of deals) {
-    d.category = categorize.categorize(d.title);
-    d.store = categorize.detectStore(d.title, d.url);
-    d.price = categorize.extractPrice(d.title);
+    // direct store fetchers pre-set these; feeds derive them from the title
+    d.category = d.category ?? categorize.categorize(d.title);
+    d.store = d.store ?? categorize.detectStore(d.title, d.url);
+    d.price = d.price ?? categorize.extractPrice(d.title);
     d.discount_pct = d.discount_pct ?? categorize.extractDiscount(d.title);
   }
   const added = db.upsertDeals(deals);
@@ -135,9 +136,17 @@ if (existsSync(DIST)) {
 
 app.listen(PORT, () => {
   console.log(`DealRadar running on http://localhost:${PORT}`);
-  runRefresh()
-    .then((r) => console.log(`initial refresh: ${r.fetched} fetched, ${r.new} new, ${r.source_errors.length} source errors`))
-    .catch((e) => console.error("initial refresh failed:", e.message));
+  // skip the startup refresh when data is fresh — dev-server restarts were
+  // re-fetching every source each time and getting us rate-limited
+  const last = db.lastFetchedAt();
+  const freshMs = last ? Date.now() - new Date(last.replace(" ", "T") + "Z") : Infinity;
+  if (freshMs < 5 * 60 * 1000) {
+    console.log(`skipping initial refresh — data is ${Math.round(freshMs / 1000)}s old`);
+  } else {
+    runRefresh()
+      .then((r) => console.log(`initial refresh: ${r.fetched} fetched, ${r.new} new, ${r.source_errors.length} source errors`))
+      .catch((e) => console.error("initial refresh failed:", e.message));
+  }
   setInterval(() => runRefresh().catch((e) => console.error("refresh failed:", e.message)),
     REFRESH_MINUTES * 60 * 1000);
 });

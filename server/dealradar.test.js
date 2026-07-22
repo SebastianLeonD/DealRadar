@@ -6,7 +6,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { categorize, detectStore, extractPrice } from "./categorize.js";
 import * as db from "./db.js";
-import { mapHM, mapZara } from "./scrapers.js";
+import { mapHM } from "./stores/hm.js";
+import { mapSteam } from "./stores/steam.js";
+import { mapZara } from "./stores/zara.js";
 import { entryImage } from "./sources.js";
 
 describe("categorize", () => {
@@ -138,6 +140,27 @@ describe("scraper mappers", () => {
     expect(deals[0].title).toBe("Loose Jeans — $3.99 (was $9.99, 60% off)");
     expect(deals[0].url).toBe("https://www2.hm.com/en_us/productpage.1.html");
     expect(detectStore(deals[0].title, deals[0].url)).toBe("H&M");
+  });
+});
+
+describe("steam mapper", () => {
+  it("maps specials with preset category/store", () => {
+    const data = {
+      specials: {
+        items: [
+          { name: "Palworld", id: 1623730, discounted: true, discount_percent: 30,
+            final_price: 2099, original_price: 2999, large_capsule_image: "https://img.test/pal.jpg" },
+          { name: "Not discounted", id: 2, discounted: false },
+        ],
+      },
+    };
+    const deals = mapSteam(data);
+    expect(deals).toHaveLength(1);
+    expect(deals[0].title).toBe("Palworld — $20.99 (was $29.99, 30% off)");
+    expect(deals[0].url).toBe("https://store.steampowered.com/app/1623730");
+    expect(deals[0].category).toBe("Gaming");
+    expect(deals[0].store).toBe("Steam");
+    expect(deals[0].discount_pct).toBe(30);
   });
 });
 

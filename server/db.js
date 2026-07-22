@@ -137,6 +137,12 @@ export function filterFacets() {
   return { colors: top(colors, 14), sizes: top(sizes, 14) };
 }
 
+/** ISO timestamp of the most recent fetch, or null on an empty DB. */
+export function lastFetchedAt() {
+  const row = connect().prepare("SELECT MAX(fetched_at) AS t FROM deals").get();
+  return row?.t ?? null;
+}
+
 export function categoryCounts() {
   return connect()
     .prepare("SELECT category, COUNT(*) AS n FROM deals GROUP BY category ORDER BY n DESC")

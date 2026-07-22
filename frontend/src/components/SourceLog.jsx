@@ -27,8 +27,8 @@ export default function SourceLog({ status }) {
                 {timeAgo(r.at).toUpperCase()} — {r.fetched} FETCHED, {r.new} NEW
               </div>
               {r.sources.map((s) => (
-                <div className={`sourcelog-row ${s.ok ? "ok" : "fail"}`} key={s.source}>
-                  <span className="dotmark">{s.ok ? "●" : "✕"}</span>
+                <div className={`sourcelog-row ${s.ok ? "ok" : s.skipped ? "skip" : "fail"}`} key={s.source}>
+                  <span className="dotmark">{s.ok ? "●" : s.skipped ? "○" : "✕"}</span>
                   <span className="srcname">{s.source}</span>
                   <span className="srcinfo">
                     {s.ok ? `${s.count} items` : s.error} · {s.ms}ms

@@ -294,5 +294,6 @@ a.gobtn:hover { background: var(--red); border-color: var(--red); box-shadow: va
 .sourcelog-row .dotmark { width: 12px; }
 .sourcelog-row.ok .dotmark { color: var(--good); }
 .sourcelog-row.fail { color: var(--red-dark); }
+.sourcelog-row.skip { color: var(--ink-soft); font-style: italic; }
 .sourcelog-row .srcname { width: 190px; flex-shrink: 0; }
 .sourcelog-row .srcinfo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

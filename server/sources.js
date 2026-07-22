@@ -1,6 +1,6 @@
 // Deal feed fetchers. All sources are free public RSS/Atom feeds — no API keys.
 import Parser from "rss-parser";
-import { SCRAPERS } from "./scrapers.js";
+import { SCRAPERS } from "./stores/index.js";
 
 // Per-store Slickdeals search feeds cover retailers whose own sites block
 // server-side requests (Akamai 403): Hollister, PacSun, ASOS — plus Amazon,
@@ -23,6 +23,8 @@ export const FEEDS = [
   sdSearch("pacsun"),
   sdSearch("asos"),
   sdSearch("amazon"),
+  sdSearch("uniqlo"), // Uniqlo's own API hides sale prices; Slickdeals covers it
+
 ];
 
 /** Every source — RSS feeds and direct retailer scrapers — as {name, fetch}. */
@@ -89,6 +91,11 @@ export async function fetchFeed(name, url) {
   return deals;
 }
 
+// After a rate-limit (429), skip the source for a while instead of hammering
+// it every refresh. In-memory: source name -> epoch ms until which to skip.
+const COOLDOWN_MS = 30 * 60 * 1000;
+const coolingUntil = new Map();
+
 /** Fetch every source (feeds + scrapers). Returns {deals, errors, health} —
     one source failing never blocks the rest; health has a row per source. */
 export async function fetchAll() {
@@ -97,13 +104,23 @@ export async function fetchAll() {
   const health = [];
   await Promise.all(
     ALL_SOURCES.map(async (s) => {
+      const until = coolingUntil.get(s.name);
+      if (until && Date.now() < until) {
+        health.push({
+          source: s.name, ok: false, count: 0, ms: 0, skipped: true,
+          error: `rate-limited — cooling down until ${new Date(until).toLocaleTimeString()}`,
+        });
+        return;
+      }
       const started = Date.now();
       try {
         const d = await s.fetch();
+        coolingUntil.delete(s.name);
         deals.push(...d);
         health.push({ source: s.name, ok: true, count: d.length, ms: Date.now() - started });
       } catch (e) {
         const error = String(e?.message ?? e);
+        if (error.includes("429")) coolingUntil.set(s.name, Date.now() + COOLDOWN_MS);
         errors.push(`${s.name}: ${error}`);
         health.push({ source: s.name, ok: false, count: 0, error, ms: Date.now() - started });
       }
