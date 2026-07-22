@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DealRadar</title>
+<style>
+  :root {
+    --bg: #101418; --panel: #1a2027; --panel-2: #212a33;
+    --text: #e8edf2; --muted: #8fa0b0; --accent: #ffb454;
+    --green: #63d68b; --red: #ff7a7a; --border: #2c3641;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 18px 24px; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; background: var(--bg); z-index: 5;
+  }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .5px; }
+  h1 span { color: var(--accent); }
+  .grow { flex: 1; }
+  input[type=search] {
+    background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 8px 12px; width: 240px; outline: none;
+  }
+  button {
+    background: var(--accent); color: #1a1205; border: 0; border-radius: 8px;
+    padding: 8px 14px; font-weight: 600; cursor: pointer;
+  }
+  button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  button:disabled { opacity: .5; cursor: wait; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 14px 24px 0; }
+  .chip {
+    background: var(--panel); border: 1px solid var(--border); color: var(--muted);
+    border-radius: 999px; padding: 5px 13px; cursor: pointer; font-size: 13px;
+  }
+  .chip.active { background: var(--accent); border-color: var(--accent); color: #1a1205; font-weight: 600; }
+  .chip b { color: inherit; }
+  main { padding: 18px 24px 60px; display: grid; gap: 12px; max-width: 980px; margin: 0 auto; }
+  .deal {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 16px; display: flex; gap: 14px; align-items: flex-start;
+  }
+  .score {
+    min-width: 46px; height: 46px; border-radius: 10px; display: flex;
+    align-items: center; justify-content: center; font-weight: 700; font-size: 17px;
+    background: var(--panel-2); color: var(--muted); flex-shrink: 0;
+  }
+  .score.hi { background: rgba(99,214,139,.15); color: var(--green); }
+  .score.mid { background: rgba(255,180,84,.15); color: var(--accent); }
+  .score.lo { background: rgba(255,122,122,.12); color: var(--red); }
+  .deal a.title { color: var(--text); text-decoration: none; font-weight: 600; }
+  .deal a.title:hover { color: var(--accent); }
+  .meta { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+  .meta .cat { color: var(--accent); font-weight: 600; }
+  .take { color: var(--muted); font-size: 13.5px; margin-top: 6px; font-style: italic; }
+  .empty { text-align: center; color: var(--muted); padding: 60px 0; }
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    padding: 10px 18px; border-radius: 10px; font-size: 14px; display: none;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🛰️ Deal<span>Radar</span></h1>
+  <div class="grow"></div>
+  <input id="search" type="search" placeholder="Search deals…">
+  <button id="refresh">Refresh deals</button>
+  <button id="notify" class="secondary" title="Post top 5 deals to your Discord webhook">Post to Discord</button>
+</header>
+
+<div class="chips" id="chips"></div>
+<main id="list"><div class="empty">Loading…</div></main>
+<div class="toast" id="toast"></div>
+
+<script>
+  let activeCategory = "All";
+  const $ = (id) => document.getElementById(id);
+
+  function toast(msg) {
+    const t = $("toast");
+    t.textContent = msg; t.style.display = "block";
+    clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 4000);
+  }
+
+  async function loadCategories() {
+    const { categories } = await (await fetch("/api/categories")).json();
+    const total = categories.reduce((s, c) => s + c.n, 0);
+    const all = [{ category: "All", n: total }, ...categories];
+    $("chips").innerHTML = all.map(c =>
+      `<div class="chip ${c.category === activeCategory ? "active" : ""}"
+            onclick="setCategory('${c.category}')">${c.category} <b>${c.n}</b></div>`
+    ).join("");
+  }
+
+  function setCategory(cat) { activeCategory = cat; loadCategories(); loadDeals(); }
+
+  function scoreClass(s) { return s >= 8 ? "hi" : s >= 5 ? "mid" : "lo"; }
+  function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+  async function loadDeals() {
+    const params = new URLSearchParams();
+    if (activeCategory !== "All") params.set("category", activeCategory);
+    const q = $("search").value.trim();
+    if (q) params.set("q", q);
+    const { deals } = await (await fetch("/api/deals?" + params)).json();
+    if (!deals.length) {
+      $("list").innerHTML = `<div class="empty">No deals yet — hit <b>Refresh deals</b> to pull the latest.</div>`;
+      return;
+    }
+    $("list").innerHTML = deals.map(d => `
+      <div class="deal">
+        <div class="score ${d.ai_score ? scoreClass(d.ai_score) : ""}">${d.ai_score ?? "–"}</div>
+        <div>
+          <a class="title" href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.title)}</a>
+          <div class="meta"><span class="cat">${esc(d.category)}</span> · ${esc(d.source)}
+            ${d.posted_at ? " · " + esc(d.posted_at.slice(0, 10)) : ""}</div>
+          ${d.ai_take ? `<div class="take">“${esc(d.ai_take)}”</div>` : ""}
+        </div>
+      </div>`).join("");
+  }
+
+  $("refresh").onclick = async () => {
+    const btn = $("refresh");
+    btn.disabled = true; btn.textContent = "Refreshing…";
+    try {
+      const r = await (await fetch("/api/refresh", { method: "POST" })).json();
+      let msg = `Fetched ${r.fetched} deals (${r.new} new)`;
+      if (r.ai_scored) msg += `, AI-scored ${r.ai_scored}`;
+      if (r.source_errors?.length) msg += ` — ${r.source_errors.length} source(s) failed`;
+      toast(msg);
+      await loadCategories(); await loadDeals();
+    } catch (e) { toast("Refresh failed: " + e); }
+    btn.disabled = false; btn.textContent = "Refresh deals";
+  };
+
+  $("notify").onclick = async () => {
+    try {
+      const resp = await fetch("/api/notify", { method: "POST" });
+      const body = await resp.json();
+      toast(resp.ok ? `Posted ${body.posted} deals to Discord` : (body.detail || "Failed"));
+    } catch (e) { toast("Discord post failed: " + e); }
+  };
+
+  let searchTimer;
+  $("search").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadDeals, 250); };
+
+  loadCategories(); loadDeals();
+</script>
+</body>
+</html>
