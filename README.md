@@ -11,13 +11,17 @@ Discord channel via webhook — exactly the workflow the paid groups charge for.
 
 ## What it does
 
-1. **Aggregates** — fetches RSS/Atom feeds from Slickdeals and Reddit deal subs
-   (r/deals, r/buildapcsales, r/frugalmalefashion, r/FrugalFemaleFashion,
-   r/GameDeals). No API keys needed for any source.
+1. **Aggregates — live** — the server pulls RSS/Atom feeds from Slickdeals and
+   Reddit deal subs (r/deals, r/buildapcsales, r/frugalmalefashion,
+   r/FrugalFemaleFashion, r/GameDeals) automatically every 15 minutes
+   (`DEALRADAR_REFRESH_MINUTES` to change), and the dashboard re-polls every
+   60 seconds — no button pressing. Deals default to newest-first with a
+   freshness window (Last 24h / 48h / 7d) so you never look at dead deals.
 2. **Parses every deal** — extracts the sale **price** from the title and
-   detects the **store** (Amazon, Zara, ASOS, Hollister, Nike, Uniqlo, Best
-   Buy, ...) from the deal's link/title, so you can shop-filter like
-   *"jeans under $30 from ASOS"*.
+   detects the **store** (Amazon, Zara, ASOS, Hollister, PacSun, Ralph Lauren,
+   H&M, American Eagle, Urban Outfitters, J.Crew, Vans, New Balance, Nike,
+   Uniqlo, Best Buy, ...) from the deal's link/title, so you can shop-filter
+   like *"jeans under $30 from ASOS"*.
 3. **Categorizes** — a keyword engine buckets every deal into a category
    instantly. If you set `ANTHROPIC_API_KEY`, Claude additionally scores each
    deal 1–10 and writes a one-line take ("solid all-time-low on a good TV" vs
@@ -49,6 +53,7 @@ Open http://localhost:8000 and click **Refresh deals** to pull the latest.
 | --------------------- | -------------------------------------------------------- |
 | `ANTHROPIC_API_KEY`   | Claude deal scoring (1–10 + one-line verdict per deal)    |
 | `DEALRADAR_AI_MODEL`  | Override the Claude model (default `claude-opus-4-8`)     |
+| `DEALRADAR_REFRESH_MINUTES` | Background feed-refresh interval (default 15)       |
 | `DISCORD_WEBHOOK_URL` | "Post top deals" button → posts to your Discord channel   |
 
 Without any keys, everything still works — you just get keyword categories
@@ -58,10 +63,11 @@ instead of AI scores.
 
 | Endpoint              | Method | Description                                      |
 | --------------------- | ------ | ------------------------------------------------ |
-| `/api/deals`          | GET    | List deals. Params: `category`, `item`, `store`, `max_price`, `min_price`, `q`, `limit` |
+| `/api/deals`          | GET    | List deals. Params: `category`, `item`, `store`, `max_price`, `min_price`, `max_age_hours`, `order` (`new`/`best`), `q`, `limit` |
 | `/api/categories`     | GET    | Category names with deal counts                  |
 | `/api/stores`         | GET    | Detected stores with deal counts                 |
-| `/api/refresh`        | POST   | Fetch all sources, store + categorize new deals  |
+| `/api/status`         | GET    | Feature flags + last background-refresh time     |
+| `/api/refresh`        | POST   | Manual refresh (the server also does this on a timer) |
 | `/api/notify`         | POST   | Push current top deals to the Discord webhook    |
 
 Example — jeans under $30 from ASOS:
@@ -90,7 +96,6 @@ static/
 
 ## Roadmap ideas
 
-- Scheduled auto-refresh (cron / background task) so the feed is always fresh
 - Price-history tracking to catch fake "discounts"
 - User accounts + paid tier (Stripe) if you want to run it as a business
 - Telegram bot output alongside Discord

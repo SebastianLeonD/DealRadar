@@ -83,10 +83,16 @@ def list_deals(
     store: str | None = None,
     max_price: float | None = None,
     min_price: float | None = None,
+    max_age_hours: float | None = None,
+    order: str = "new",
     limit: int = 100,
 ) -> list[dict]:
     sql = "SELECT * FROM deals"
     clauses, params = [], []
+    if max_age_hours is not None:
+        # posted_at (from the feed) when available, else when we first saw it
+        clauses.append("datetime(COALESCE(posted_at, fetched_at)) >= datetime('now', ?)")
+        params.append(f"-{max_age_hours} hours")
     if category and category != "All":
         clauses.append("category = ?")
         params.append(category)
@@ -107,7 +113,11 @@ def list_deals(
         params.append(min_price)
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY ai_score IS NULL, ai_score DESC, fetched_at DESC LIMIT ?"
+    if order == "best":
+        sql += " ORDER BY ai_score IS NULL, ai_score DESC, datetime(COALESCE(posted_at, fetched_at)) DESC"
+    else:  # "new" — live feed, most recent first
+        sql += " ORDER BY datetime(COALESCE(posted_at, fetched_at)) DESC"
+    sql += " LIMIT ?"
     params.append(limit)
     with connect() as conn:
         rows = conn.execute(sql, params).fetchall()

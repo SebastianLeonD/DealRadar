@@ -1,8 +1,17 @@
 """DealRadar — FastAPI backend + dashboard.
 
 Run with:  uvicorn app.main:app --reload
+
+The server refreshes all feeds in the background every
+DEALRADAR_REFRESH_MINUTES (default 15) so the board stays live without
+anyone pressing the button.
 """
 
+import asyncio
+import contextlib
+import os
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -10,52 +19,13 @@ from fastapi.responses import FileResponse
 
 from app import categorize, db, notify, sources
 
-app = FastAPI(title="DealRadar", version="0.1.0")
-
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+REFRESH_MINUTES = float(os.environ.get("DEALRADAR_REFRESH_MINUTES", "15"))
+
+_last_refresh: dict = {"at": None, "result": None}
 
 
-@app.get("/")
-def index():
-    return FileResponse(STATIC_DIR / "index.html")
-
-
-@app.get("/api/deals")
-def get_deals(
-    category: str | None = None,
-    q: str | None = None,
-    item: str | None = None,
-    store: str | None = None,
-    max_price: float | None = Query(default=None, ge=0),
-    min_price: float | None = Query(default=None, ge=0),
-    limit: int = Query(default=100, le=500),
-):
-    return {"deals": db.list_deals(category=category, q=q, item=item, store=store,
-                                   max_price=max_price, min_price=min_price,
-                                   limit=limit)}
-
-
-@app.get("/api/categories")
-def get_categories():
-    return {"categories": db.category_counts()}
-
-
-@app.get("/api/stores")
-def get_stores():
-    return {"stores": db.store_counts()}
-
-
-@app.get("/api/status")
-def get_status():
-    return {
-        "ai_enabled": categorize.ai_available(),
-        "discord_enabled": notify.webhook_configured(),
-        "sources": [f["name"] for f in sources.FEEDS],
-    }
-
-
-@app.post("/api/refresh")
-def refresh():
+def run_refresh() -> dict:
     """Fetch all feeds, store new deals, categorize, and (if enabled) AI-score them."""
     fetched, errors = sources.fetch_all()
     for deal in fetched:
@@ -75,13 +45,88 @@ def refresh():
         except Exception as exc:  # noqa: BLE001 — AI scoring is best-effort
             ai_error = str(exc)
 
-    return {
+    result = {
         "fetched": len(fetched),
         "new": new_count,
         "ai_scored": scored,
         "ai_error": ai_error,
         "source_errors": errors,
     }
+    _last_refresh["at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    _last_refresh["result"] = result
+    return result
+
+
+async def _auto_refresh_loop() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(run_refresh)
+        except Exception:  # noqa: BLE001 — never let one bad cycle kill the loop
+            pass
+        await asyncio.sleep(REFRESH_MINUTES * 60)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    task = asyncio.create_task(_auto_refresh_loop())
+    yield
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
+app = FastAPI(title="DealRadar", version="0.2.0", lifespan=lifespan)
+
+
+@app.get("/")
+def index():
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/api/deals")
+def get_deals(
+    category: str | None = None,
+    q: str | None = None,
+    item: str | None = None,
+    store: str | None = None,
+    max_price: float | None = Query(default=None, ge=0),
+    min_price: float | None = Query(default=None, ge=0),
+    max_age_hours: float | None = Query(default=None, gt=0),
+    order: str = Query(default="new", pattern="^(new|best)$"),
+    limit: int = Query(default=100, le=500),
+):
+    return {"deals": db.list_deals(category=category, q=q, item=item, store=store,
+                                   max_price=max_price, min_price=min_price,
+                                   max_age_hours=max_age_hours, order=order,
+                                   limit=limit)}
+
+
+@app.get("/api/categories")
+def get_categories():
+    return {"categories": db.category_counts()}
+
+
+@app.get("/api/stores")
+def get_stores():
+    return {"stores": db.store_counts()}
+
+
+@app.get("/api/status")
+def get_status():
+    return {
+        "ai_enabled": categorize.ai_available(),
+        "discord_enabled": notify.webhook_configured(),
+        "sources": [f["name"] for f in sources.FEEDS],
+        "auto_refresh_minutes": REFRESH_MINUTES,
+        "last_refresh_at": _last_refresh["at"],
+        "last_refresh": _last_refresh["result"],
+    }
+
+
+@app.post("/api/refresh")
+async def refresh():
+    """Manual refresh — same job the background loop runs on its own."""
+    return await asyncio.to_thread(run_refresh)
 
 
 @app.post("/api/notify")

@@ -57,6 +57,30 @@ def test_detect_store_unknown():
     assert categorize.detect_store("Random local shop clearance") is None
 
 
+def test_detect_mens_popular_stores():
+    assert categorize.detect_store("PacSun: all shorts 2 for $40") == "PacSun"
+    assert categorize.detect_store("Ralph Lauren polo sale 40% off") == "Ralph Lauren"
+    assert categorize.detect_store("H&M members: extra 20% off") == "H&M"
+    assert categorize.detect_store("American Eagle jeans $29.99") == "American Eagle"
+    assert categorize.detect_store("Vans slip-ons $35", "https://www.vans.com/x") == "Vans"
+    assert categorize.detect_store("New Balance 574 $59.99") == "New Balance"
+
+
+def test_age_filter_and_order(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
+    db.upsert_deals([
+        {"title": "fresh deal $10", "url": "https://x.test/f", "source": "t",
+         "category": "Other", "posted_at": "2099-01-01T00:00:00Z"},
+        {"title": "ancient deal $10", "url": "https://x.test/o", "source": "t",
+         "category": "Other", "posted_at": "2001-01-01T00:00:00Z"},
+    ])
+    fresh_only = db.list_deals(max_age_hours=48)
+    assert [d["title"] for d in fresh_only] == ["fresh deal $10"]
+    newest_first = db.list_deals(order="new")
+    assert newest_first[0]["title"] == "fresh deal $10"
+    assert len(db.list_deals()) == 2  # no age filter -> everything
+
+
 def test_price_and_store_filters(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
     db.upsert_deals([
