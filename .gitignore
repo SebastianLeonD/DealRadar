@@ -1,6 +1,10 @@
+node_modules/
+dist/
+.env
+data/
+
+# leftovers from the old python backend
 __pycache__/
 *.pyc
 venv/
-.env
-data/
 .pytest_cache/

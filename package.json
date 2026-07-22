@@ -1,0 +1,22 @@
+{
+  "name": "dealradar",
+  "private": true,
+  "version": "0.4.0",
+  "type": "module",
+  "workspaces": [
+    "frontend",
+    "server"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace frontend",
+    "start": "node server/index.js",
+    "dev": "concurrently -n api,web -c blue,yellow \"node --watch server/index.js\" \"npm run dev --workspace frontend\"",
+    "test": "npm test --workspace server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}
