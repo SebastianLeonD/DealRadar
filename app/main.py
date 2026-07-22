@@ -24,14 +24,25 @@ def index():
 def get_deals(
     category: str | None = None,
     q: str | None = None,
+    item: str | None = None,
+    store: str | None = None,
+    max_price: float | None = Query(default=None, ge=0),
+    min_price: float | None = Query(default=None, ge=0),
     limit: int = Query(default=100, le=500),
 ):
-    return {"deals": db.list_deals(category=category, q=q, limit=limit)}
+    return {"deals": db.list_deals(category=category, q=q, item=item, store=store,
+                                   max_price=max_price, min_price=min_price,
+                                   limit=limit)}
 
 
 @app.get("/api/categories")
 def get_categories():
     return {"categories": db.category_counts()}
+
+
+@app.get("/api/stores")
+def get_stores():
+    return {"stores": db.store_counts()}
 
 
 @app.get("/api/status")
@@ -49,6 +60,8 @@ def refresh():
     fetched, errors = sources.fetch_all()
     for deal in fetched:
         deal["category"] = categorize.categorize(deal["title"])
+        deal["store"] = categorize.detect_store(deal["title"], deal["url"])
+        deal["price"] = categorize.extract_price(deal["title"])
     new_count = db.upsert_deals(fetched)
 
     scored = 0

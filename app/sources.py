@@ -13,6 +13,7 @@ FEEDS = [
     {"name": "r/deals", "url": "https://www.reddit.com/r/deals/.rss"},
     {"name": "r/buildapcsales", "url": "https://www.reddit.com/r/buildapcsales/.rss"},
     {"name": "r/frugalmalefashion", "url": "https://www.reddit.com/r/frugalmalefashion/.rss"},
+    {"name": "r/FrugalFemaleFashion", "url": "https://www.reddit.com/r/FrugalFemaleFashion/.rss"},
     {"name": "r/GameDeals", "url": "https://www.reddit.com/r/GameDeals/.rss"},
 ]
 

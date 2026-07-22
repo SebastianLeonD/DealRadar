@@ -8,6 +8,8 @@ Two layers:
 
 import json
 import os
+import re
+from urllib.parse import urlparse
 
 CATEGORIES = [
     "Tech", "Clothing", "Gaming", "Home", "Beauty", "Food", "Sports", "Other",
@@ -53,6 +55,65 @@ _KEYWORDS = {
         "hiking", "golf", "fitness", "yoga", "backpack", "cooler",
     ],
 }
+
+
+# Retailer detection — matched against title + URL, first hit wins.
+# Longer/more specific names come before substrings that could collide.
+STORES = [
+    ("Abercrombie", ["abercrombie"]),
+    ("Hollister", ["hollister"]),
+    ("ASOS", ["asos"]),
+    ("Zara", ["zara"]),
+    ("H&M", ["h&m", "hm.com"]),
+    ("Uniqlo", ["uniqlo"]),
+    ("Old Navy", ["old navy", "oldnavy"]),
+    ("Gap", ["gap.com", " gap "]),
+    ("Nike", ["nike"]),
+    ("Adidas", ["adidas"]),
+    ("Levi's", ["levi's", "levis", "levi.com"]),
+    ("Amazon", ["amazon", "amzn.to"]),
+    ("Walmart", ["walmart"]),
+    ("Target", ["target.com", "target "]),
+    ("Best Buy", ["best buy", "bestbuy"]),
+    ("Costco", ["costco"]),
+    ("eBay", ["ebay"]),
+    ("Macy's", ["macy's", "macys"]),
+    ("Nordstrom", ["nordstrom"]),
+    ("Steam", ["steampowered", "steam "]),
+    ("Woot", ["woot.com", "woot!"]),
+]
+
+_PRICE_RE = re.compile(r"\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)")
+
+
+def extract_price(title: str) -> float | None:
+    """Pull the deal price out of a title like 'Levi's 501 Jeans $39.99 (was $70)'.
+
+    Uses the first dollar amount, which in deal titles is almost always the
+    sale price (the original price comes after, e.g. 'was $70', 'reg. $100').
+    """
+    match = _PRICE_RE.search(title)
+    if not match:
+        return None
+    return float(match.group(1).replace(",", ""))
+
+
+def detect_store(title: str, url: str = "") -> str | None:
+    """Identify the retailer from the deal URL (preferred) or title.
+
+    The URL wins because it names where you actually buy: "Levi's jeans at
+    Amazon" linking to amazon.com is an Amazon deal, not a Levi's-store deal.
+    """
+    domain = urlparse(url).netloc.lower() if url else ""
+    if domain:
+        for store, needles in STORES:
+            if any(n in domain for n in needles):
+                return store
+    title_hay = f" {title} ".lower()
+    for store, needles in STORES:
+        if any(n in title_hay for n in needles):
+            return store
+    return None
 
 
 def categorize(title: str) -> str:

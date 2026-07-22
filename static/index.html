@@ -23,10 +23,12 @@
   h1 { font-size: 20px; margin: 0; letter-spacing: .5px; }
   h1 span { color: var(--accent); }
   .grow { flex: 1; }
-  input[type=search] {
+  input[type=search], input[type=number], select {
     background: var(--panel); border: 1px solid var(--border); color: var(--text);
-    border-radius: 8px; padding: 8px 12px; width: 240px; outline: none;
+    border-radius: 8px; padding: 8px 12px; outline: none;
   }
+  input[type=search] { width: 220px; }
+  input[type=number] { width: 110px; }
   button {
     background: var(--accent); color: #1a1205; border: 0; border-radius: 8px;
     padding: 8px 14px; font-weight: 600; cursor: pointer;
@@ -34,6 +36,8 @@
   button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
   button:disabled { opacity: .5; cursor: wait; }
   .chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 14px 24px 0; }
+  .chips.items { padding-top: 8px; }
+  .chips .label { color: var(--muted); font-size: 12px; align-self: center; margin-right: 2px; }
   .chip {
     background: var(--panel); border: 1px solid var(--border); color: var(--muted);
     border-radius: 999px; padding: 5px 13px; cursor: pointer; font-size: 13px;
@@ -57,6 +61,13 @@
   .deal a.title:hover { color: var(--accent); }
   .meta { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
   .meta .cat { color: var(--accent); font-weight: 600; }
+  .price {
+    color: var(--green); font-weight: 700; font-size: 15px; margin-left: 8px;
+  }
+  .storetag {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 1px 7px; font-size: 12px; margin-right: 6px;
+  }
   .take { color: var(--muted); font-size: 13.5px; margin-top: 6px; font-style: italic; }
   .empty { text-align: center; color: var(--muted); padding: 60px 0; }
   .toast {
@@ -71,16 +82,21 @@
   <h1>🛰️ Deal<span>Radar</span></h1>
   <div class="grow"></div>
   <input id="search" type="search" placeholder="Search deals…">
+  <select id="store"><option value="All">All stores</option></select>
+  <input id="maxprice" type="number" min="0" step="1" placeholder="Max $">
   <button id="refresh">Refresh deals</button>
   <button id="notify" class="secondary" title="Post top 5 deals to your Discord webhook">Post to Discord</button>
 </header>
 
 <div class="chips" id="chips"></div>
+<div class="chips items" id="itemChips"></div>
 <main id="list"><div class="empty">Loading…</div></main>
 <div class="toast" id="toast"></div>
 
 <script>
   let activeCategory = "All";
+  let activeItem = "All";
+  const ITEM_TYPES = ["All", "Jeans", "Shorts", "Tee", "Hoodie", "Jacket", "Sneaker", "Shoe", "Dress", "Sweater"];
   const $ = (id) => document.getElementById(id);
 
   function toast(msg) {
@@ -101,14 +117,35 @@
 
   function setCategory(cat) { activeCategory = cat; loadCategories(); loadDeals(); }
 
+  function renderItemChips() {
+    $("itemChips").innerHTML = `<span class="label">Item:</span>` + ITEM_TYPES.map(t =>
+      `<div class="chip ${t === activeItem ? "active" : ""}" onclick="setItem('${t}')">${t}</div>`
+    ).join("");
+  }
+  function setItem(t) { activeItem = t; renderItemChips(); loadDeals(); }
+
+  async function loadStores() {
+    const { stores } = await (await fetch("/api/stores")).json();
+    const sel = $("store");
+    const current = sel.value;
+    sel.innerHTML = `<option value="All">All stores</option>` +
+      stores.map(s => `<option value="${esc(s.store)}">${esc(s.store)} (${s.n})</option>`).join("");
+    if ([...sel.options].some(o => o.value === current)) sel.value = current;
+  }
+
   function scoreClass(s) { return s >= 8 ? "hi" : s >= 5 ? "mid" : "lo"; }
   function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
 
   async function loadDeals() {
     const params = new URLSearchParams();
     if (activeCategory !== "All") params.set("category", activeCategory);
+    if (activeItem !== "All") params.set("item", activeItem);
     const q = $("search").value.trim();
     if (q) params.set("q", q);
+    const store = $("store").value;
+    if (store !== "All") params.set("store", store);
+    const maxPrice = $("maxprice").value;
+    if (maxPrice) params.set("max_price", maxPrice);
     const { deals } = await (await fetch("/api/deals?" + params)).json();
     if (!deals.length) {
       $("list").innerHTML = `<div class="empty">No deals yet — hit <b>Refresh deals</b> to pull the latest.</div>`;
@@ -119,7 +156,10 @@
         <div class="score ${d.ai_score ? scoreClass(d.ai_score) : ""}">${d.ai_score ?? "–"}</div>
         <div>
           <a class="title" href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.title)}</a>
-          <div class="meta"><span class="cat">${esc(d.category)}</span> · ${esc(d.source)}
+          ${d.price != null ? `<span class="price">$${d.price}</span>` : ""}
+          <div class="meta">
+            ${d.store ? `<span class="storetag">${esc(d.store)}</span>` : ""}
+            <span class="cat">${esc(d.category)}</span> · ${esc(d.source)}
             ${d.posted_at ? " · " + esc(d.posted_at.slice(0, 10)) : ""}</div>
           ${d.ai_take ? `<div class="take">“${esc(d.ai_take)}”</div>` : ""}
         </div>
@@ -135,7 +175,7 @@
       if (r.ai_scored) msg += `, AI-scored ${r.ai_scored}`;
       if (r.source_errors?.length) msg += ` — ${r.source_errors.length} source(s) failed`;
       toast(msg);
-      await loadCategories(); await loadDeals();
+      await loadCategories(); await loadStores(); await loadDeals();
     } catch (e) { toast("Refresh failed: " + e); }
     btn.disabled = false; btn.textContent = "Refresh deals";
   };
@@ -150,8 +190,10 @@
 
   let searchTimer;
   $("search").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadDeals, 250); };
+  $("maxprice").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadDeals, 300); };
+  $("store").onchange = loadDeals;
 
-  loadCategories(); loadDeals();
+  renderItemChips(); loadCategories(); loadStores(); loadDeals();
 </script>
 </body>
 </html>

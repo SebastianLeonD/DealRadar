@@ -12,15 +12,20 @@ Discord channel via webhook — exactly the workflow the paid groups charge for.
 ## What it does
 
 1. **Aggregates** — fetches RSS/Atom feeds from Slickdeals and Reddit deal subs
-   (r/deals, r/buildapcsales, r/frugalmalefashion, r/GameDeals). No API keys
-   needed for any source.
-2. **Categorizes** — a keyword engine buckets every deal into a category
+   (r/deals, r/buildapcsales, r/frugalmalefashion, r/FrugalFemaleFashion,
+   r/GameDeals). No API keys needed for any source.
+2. **Parses every deal** — extracts the sale **price** from the title and
+   detects the **store** (Amazon, Zara, ASOS, Hollister, Nike, Uniqlo, Best
+   Buy, ...) from the deal's link/title, so you can shop-filter like
+   *"jeans under $30 from ASOS"*.
+3. **Categorizes** — a keyword engine buckets every deal into a category
    instantly. If you set `ANTHROPIC_API_KEY`, Claude additionally scores each
    deal 1–10 and writes a one-line take ("solid all-time-low on a good TV" vs
    "fake discount, ignore").
-3. **Serves a dashboard** — browse, filter by category, and search all deals at
-   `http://localhost:8000`.
-4. **Posts to Discord (optional)** — set `DISCORD_WEBHOOK_URL` and hit the
+4. **Serves a dashboard** — browse at `http://localhost:8000`: category chips,
+   item-type chips (Jeans, Shorts, Hoodie, Sneaker, ...), store dropdown,
+   max-price box, and free-text search — all combinable.
+5. **Posts to Discord (optional)** — set `DISCORD_WEBHOOK_URL` and hit the
    "Post top deals" button (or `POST /api/notify`) to push the best current
    deals into your own server, formatted like the paid groups do it.
 
@@ -53,10 +58,22 @@ instead of AI scores.
 
 | Endpoint              | Method | Description                                      |
 | --------------------- | ------ | ------------------------------------------------ |
-| `/api/deals`          | GET    | List deals. Params: `category`, `q`, `limit`     |
+| `/api/deals`          | GET    | List deals. Params: `category`, `item`, `store`, `max_price`, `min_price`, `q`, `limit` |
 | `/api/categories`     | GET    | Category names with deal counts                  |
+| `/api/stores`         | GET    | Detected stores with deal counts                 |
 | `/api/refresh`        | POST   | Fetch all sources, store + categorize new deals  |
 | `/api/notify`         | POST   | Push current top deals to the Discord webhook    |
+
+Example — jeans under $30 from ASOS:
+
+```
+GET /api/deals?item=jeans&store=ASOS&max_price=30
+```
+
+Note on stores: Zara/ASOS/Hollister don't publish public deal feeds, so
+DealRadar tags deals *mentioning* those stores from the aggregator feeds (the
+paid groups work the same way — they watch aggregators). The store is detected
+from the deal's link domain first, falling back to the title.
 
 ## Project layout
 

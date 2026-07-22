@@ -27,6 +27,57 @@ def test_db_upsert_dedupes(tmp_path, monkeypatch):
     assert len(rows) == 1 and rows[0]["category"] == "Tech"
 
 
+def test_extract_price_basic():
+    assert categorize.extract_price("Levi's 501 Jeans $39.99 (was $70)") == 39.99
+
+
+def test_extract_price_takes_first_amount():
+    assert categorize.extract_price("Hollister shorts $ 15 reg. $40") == 15.0
+
+
+def test_extract_price_with_commas():
+    assert categorize.extract_price("LG C4 65\" OLED $1,299.99") == 1299.99
+
+
+def test_extract_price_none():
+    assert categorize.extract_price("50% off everything at ASOS") is None
+
+
+def test_detect_store_from_title():
+    assert categorize.detect_store("Hollister jeans BOGO 50% off") == "Hollister"
+    assert categorize.detect_store("ASOS extra 20% off sale") == "ASOS"
+    assert categorize.detect_store("Zara end-of-season event") == "Zara"
+
+
+def test_detect_store_from_url():
+    assert categorize.detect_store("Echo Dot $22", "https://www.amazon.com/dp/x") == "Amazon"
+
+
+def test_detect_store_unknown():
+    assert categorize.detect_store("Random local shop clearance") is None
+
+
+def test_price_and_store_filters(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
+    db.upsert_deals([
+        {"title": "Levi's jeans $39.99", "url": "https://x.test/1", "source": "t",
+         "category": "Clothing", "store": "Amazon", "price": 39.99},
+        {"title": "ASOS jeans $25", "url": "https://x.test/2", "source": "t",
+         "category": "Clothing", "store": "ASOS", "price": 25.0},
+        {"title": "Hollister shorts, no price listed", "url": "https://x.test/3", "source": "t",
+         "category": "Clothing", "store": "Hollister"},
+    ])
+    # "jeans under $30"
+    under_30 = db.list_deals(item="jeans", max_price=30)
+    assert [d["store"] for d in under_30] == ["ASOS"]
+    # store filter
+    assert len(db.list_deals(store="Hollister")) == 1
+    # max_price excludes deals with no extracted price
+    assert len(db.list_deals(max_price=1000)) == 2
+    stores = {s["store"] for s in db.store_counts()}
+    assert stores == {"Amazon", "ASOS", "Hollister"}
+
+
 def test_db_filters(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
     db.upsert_deals([
