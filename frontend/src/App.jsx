@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchCategories, fetchDeals, fetchStatus, fetchStores, postNotify, postRefresh,
 } from "./api.js";
-import Banners from "./components/Banners.jsx";
 import DealGrid from "./components/DealGrid.jsx";
 import DealModal from "./components/DealModal.jsx";
 import FilterBar from "./components/FilterBar.jsx";
 import SubNav from "./components/SubNav.jsx";
+import Ticker from "./components/Ticker.jsx";
 import TopBar from "./components/TopBar.jsx";
 
 const DEFAULT_FILTERS = {
@@ -102,6 +102,7 @@ export default function App() {
         onRefresh={onRefresh}
         onNotify={onNotify}
         refreshing={refreshing}
+        status={status}
       />
       <SubNav
         categories={categories}
@@ -110,15 +111,13 @@ export default function App() {
         onCategory={(category) => { setSaleMode(false); patchFilters({ category }); }}
         onToggleSale={() => setSaleMode((s) => !s)}
       />
-      <Banners status={status} />
+      <Ticker deals={deals} />
       <div className="page">
-        <div className="crumbs">
-          Home <span className="sep">›</span> Deals <span className="sep">›</span>{" "}
-          {saleMode ? "Hot" : catLabel}
-        </div>
         <div className="titlerow">
-          <h2>{saleMode ? "Hot Right Now 🔥" : `New In: ${catLabel}`}</h2>
-          <span className="stylecount">{deals.length} deal{deals.length === 1 ? "" : "s"}</span>
+          <h2>{saleMode ? "The Hot List" : `Today's Board — ${catLabel}`}</h2>
+          <span className="stylecount">
+            {deals.length} DEAL{deals.length === 1 ? "" : "S"} ON THE WIRE
+          </span>
         </div>
         <FilterBar filters={filters} stores={stores} saleMode={saleMode} onChange={patchFilters} />
         <DealGrid deals={deals} loading={loading} onOpen={setOpenIndex} />

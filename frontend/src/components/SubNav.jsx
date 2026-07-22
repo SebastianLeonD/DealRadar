@@ -1,28 +1,25 @@
 export default function SubNav({ categories, activeCategory, saleMode, onCategory, onToggleSale }) {
   return (
-    <nav className="subnav">
-      <div className="navrail">
+    <nav className="sections">
+      <button
+        className={`section ${!saleMode && activeCategory === "All" ? "active" : ""}`}
+        onClick={() => onCategory("All")}
+      >
+        All
+      </button>
+      {categories.map((c) => (
         <button
-          className={`navpill ${!saleMode && activeCategory === "All" ? "active" : ""}`}
-          onClick={() => onCategory("All")}
+          key={c.category}
+          className={`section ${!saleMode && c.category === activeCategory ? "active" : ""}`}
+          onClick={() => onCategory(c.category)}
         >
-          All deals
+          {c.category}
+          <sup>{c.n}</sup>
         </button>
-        {categories.map((c) => (
-          <button
-            key={c.category}
-            className={`navpill ${!saleMode && c.category === activeCategory ? "active" : ""}`}
-            onClick={() => onCategory(c.category)}
-          >
-            {c.category}
-            <span className="navcount">{c.n}</span>
-          </button>
-        ))}
-        <span className="navdivider" aria-hidden="true" />
-        <button className={`navpill hot ${saleMode ? "active" : ""}`} onClick={onToggleSale}>
-          🔥 Hot right now
-        </button>
-      </div>
+      ))}
+      <button className={`section hot ${saleMode ? "active" : ""}`} onClick={onToggleSale}>
+        Hot&nbsp;List
+      </button>
     </nav>
   );
 }

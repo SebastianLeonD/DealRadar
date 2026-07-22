@@ -15,25 +15,24 @@ export default function DealModal({ deal, onClose }) {
       <div className="modal">
         <div className="modalimg">
           <Thumb deal={deal} big />
+          {deal.ai_score ? (
+            <div className={`stamp ${scoreClass(deal.ai_score)}`}>
+              <span>RATED</span>
+              <b>{deal.ai_score}/10</b>
+            </div>
+          ) : null}
         </div>
         <div className="modalbody">
           <button className="close" onClick={onClose} title="Close">✕</button>
+          <div className="modalkicker">
+            {deal.store ? `[${deal.store.toUpperCase()}]` : "[UNLISTED]"} · {deal.category.toUpperCase()} · VIA{" "}
+            {deal.source.toUpperCase()} · {timeAgo(deal.posted_at || deal.fetched_at).toUpperCase()}
+          </div>
           <h2>{deal.title}</h2>
           {deal.price != null ? <div className="bigprice">${deal.price}</div> : null}
-          <div className="modalmeta">
-            {deal.store ? <span><b>{deal.store}</b> ·</span> : null}
-            <span>{deal.category}</span> ·
-            <span>via {deal.source}</span> ·
-            <span>{timeAgo(deal.posted_at || deal.fetched_at)}</span>
-          </div>
-          {deal.ai_score ? (
-            <div className="scoreline">
-              AI deal score: <b className={scoreClass(deal.ai_score)}>{deal.ai_score}/10</b>
-            </div>
-          ) : null}
           {deal.ai_take ? <div className="take">“{deal.ai_take}”</div> : null}
           <a className="gobtn" href={deal.url} target="_blank" rel="noopener noreferrer">
-            Open deal ↗
+            OPEN DEAL ↗
           </a>
         </div>
       </div>
