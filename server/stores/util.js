@@ -6,10 +6,16 @@ export const HEADERS = {
   Accept: "application/json",
 };
 
-export async function getJSON(url) {
-  const resp = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(20000) });
+export async function getJSON(url, headers = {}) {
+  const resp = await fetch(url, { headers: { ...HEADERS, ...headers }, signal: AbortSignal.timeout(20000) });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return resp.json();
+}
+
+export async function getText(url) {
+  const resp = await fetch(url, { headers: { ...HEADERS, Accept: "text/html" }, signal: AbortSignal.timeout(20000) });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.text();
 }
 
 export const usd = (n) => (Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`);

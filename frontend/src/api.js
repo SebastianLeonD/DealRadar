@@ -23,7 +23,8 @@ export function fetchDeals(filters) {
 }
 
 export const fetchCategories = () => getJSON("/api/categories");
-export const fetchStores = () => getJSON("/api/stores");
+export const fetchStores = (category) =>
+  getJSON("/api/stores" + (category && category !== "All" ? `?category=${encodeURIComponent(category)}` : ""));
 export const fetchFilters = () => getJSON("/api/filters");
 export const fetchStatus = () => getJSON("/api/status");
 

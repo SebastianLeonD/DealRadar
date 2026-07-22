@@ -7,6 +7,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { categorize, detectStore, extractPrice } from "./categorize.js";
 import * as db from "./db.js";
 import { mapHM } from "./stores/hm.js";
+import { mapIkea } from "./stores/ikea.js";
+import { mapNike } from "./stores/nike.js";
 import { mapSteam } from "./stores/steam.js";
 import { mapZara } from "./stores/zara.js";
 import { entryImage } from "./sources.js";
@@ -140,6 +142,52 @@ describe("scraper mappers", () => {
     expect(deals[0].title).toBe("Loose Jeans — $3.99 (was $9.99, 60% off)");
     expect(deals[0].url).toBe("https://www2.hm.com/en_us/productpage.1.html");
     expect(detectStore(deals[0].title, deals[0].url)).toBe("H&M");
+  });
+});
+
+describe("nike mapper", () => {
+  it("maps discounted groupings, skips full-price", () => {
+    const data = {
+      productGroupings: [
+        { products: [{ copy: { title: "Nike C1TY", subTitle: "Shoes" },
+          prices: { currentPrice: 82.97, initialPrice: 105, discountPercentage: 21 },
+          pdpUrl: { url: "https://www.nike.com/t/c1ty-shoes/FZ3863-106" },
+          colorwayImages: { portraitURL: "https://static.nike.com/x.jpg" } }] },
+        { products: [{ copy: { title: "Full Price" },
+          prices: { currentPrice: 100, initialPrice: 100 },
+          pdpUrl: { url: "https://www.nike.com/t/full" } }] },
+      ],
+    };
+    const deals = mapNike(data);
+    expect(deals).toHaveLength(1);
+    expect(deals[0].title).toBe("Nike C1TY (Shoes) — $82.97 (was $105, 21% off)");
+    expect(deals[0].store).toBe("Nike");
+    expect(deals[0].discount_pct).toBe(21);
+  });
+});
+
+describe("ikea mapper", () => {
+  it("parses JSON-LD with and without strikethrough price", () => {
+    const ld = JSON.stringify({
+      "@type": "ItemList",
+      itemListElement: [
+        { "@type": "ListItem", item: { "@type": "Product", name: "BAGGMUCK, Shoe tray",
+          url: "https://www.ikea.com/us/en/p/baggmuck-70600287/", image: "https://ikea.com/b.jpg",
+          offers: { priceSpecification: [
+            { price: 3.99, priceCurrency: "USD" },
+            { priceType: "https://schema.org/StrikethroughPrice", price: 4.99 },
+          ] } } },
+        { "@type": "ListItem", item: { "@type": "Product", name: "GÖRSNYGG, Storage case",
+          url: "https://www.ikea.com/us/en/p/goersnygg-40504193/",
+          offers: { priceSpecification: [{ price: 2.99 }] } } },
+      ],
+    });
+    const deals = mapIkea(`<html><script type="application/ld+json">${ld}</script></html>`);
+    expect(deals).toHaveLength(2);
+    expect(deals[0].title).toBe("BAGGMUCK, Shoe tray — $3.99 (was $4.99, 20% off)");
+    expect(deals[0].discount_pct).toBe(20);
+    expect(deals[1].title).toBe("GÖRSNYGG, Storage case — $2.99 (last chance)");
+    expect(deals[1].category).toBe("Home");
   });
 });
 

@@ -89,7 +89,7 @@ app.get("/api/deals", (req, res) => {
 });
 
 app.get("/api/categories", (_req, res) => res.json({ categories: db.categoryCounts() }));
-app.get("/api/stores", (_req, res) => res.json({ stores: db.storeCounts() }));
+app.get("/api/stores", (req, res) => res.json({ stores: db.storeCounts(req.query.category) }));
 app.get("/api/filters", (_req, res) => res.json(db.filterFacets()));
 
 app.get("/api/status", (_req, res) => {

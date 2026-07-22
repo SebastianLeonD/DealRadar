@@ -40,7 +40,7 @@ export default function App() {
     const effective = { ...filters, order: saleMode ? "best" : filters.order };
     try {
       const [dealsRes, catsRes, storesRes, statusRes, facetsRes] = await Promise.all([
-        fetchDeals(effective), fetchCategories(), fetchStores(), fetchStatus(), fetchFilters(),
+        fetchDeals(effective), fetchCategories(), fetchStores(filters.category), fetchStatus(), fetchFilters(),
       ]);
       setDeals(dealsRes.deals);
       setCategories(catsRes.categories);
@@ -112,7 +112,11 @@ export default function App() {
         categories={categories}
         activeCategory={filters.category}
         saleMode={saleMode}
-        onCategory={(category) => { setSaleMode(false); patchFilters({ category }); }}
+        onCategory={(category) => {
+          setSaleMode(false);
+          // section change resets section-specific filters
+          patchFilters({ category, store: "All", item: "All", size: "All", color: "All" });
+        }}
         onToggleSale={() => setSaleMode((s) => !s)}
       />
       <Ticker deals={deals} />
@@ -125,7 +129,7 @@ export default function App() {
         </div>
         <SourceLog status={status} />
         <div className="pagegrid">
-          <Sidebar filters={filters} stores={stores} facets={facets} saleMode={saleMode} onChange={patchFilters} />
+          <Sidebar filters={filters} category={filters.category} stores={stores} facets={facets} saleMode={saleMode} onChange={patchFilters} />
           <main>
             <DealGrid deals={deals} loading={loading} onOpen={setOpenIndex} />
           </main>

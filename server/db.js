@@ -149,7 +149,12 @@ export function categoryCounts() {
     .all();
 }
 
-export function storeCounts() {
+export function storeCounts(category) {
+  if (category && category !== "All") {
+    return connect()
+      .prepare("SELECT store, COUNT(*) AS n FROM deals WHERE store IS NOT NULL AND category = ? GROUP BY store ORDER BY n DESC")
+      .all(category);
+  }
   return connect()
     .prepare("SELECT store, COUNT(*) AS n FROM deals WHERE store IS NOT NULL GROUP BY store ORDER BY n DESC")
     .all();

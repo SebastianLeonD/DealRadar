@@ -19,12 +19,14 @@ function Chips({ options, active, onPick, format = (v) => v }) {
   );
 }
 
-/** Left filter rail: item type, store, discount, price, size, color, freshness.
-    Size/color options come from /api/filters (scraped sources only carry them). */
-export default function Sidebar({ filters, stores, facets, saleMode, onChange }) {
+/** Left filter rail, personalized per section: clothing gets item/size/color,
+    other sections just store/discount/price/freshness. Size/color options come
+    from /api/filters (only clothing sources carry them). */
+export default function Sidebar({ filters, category = "All", stores, facets, saleMode, onChange }) {
   const set = (patch) => onChange(patch);
-  const colors = facets?.colors ?? [];
-  const sizes = facets?.sizes ?? [];
+  const clothing = category === "Clothing" || category === "All";
+  const colors = clothing ? facets?.colors ?? [] : [];
+  const sizes = clothing ? facets?.sizes ?? [] : [];
 
   return (
     <aside className="sidebar">
@@ -39,11 +41,13 @@ export default function Sidebar({ filters, stores, facets, saleMode, onChange })
         </select>
       </div>
 
-      <div className="sideblock">
-        <div className="sidehead">ITEM</div>
-        <Chips options={ITEM_TYPES.filter((t) => t !== "All")} active={filters.item}
-          onPick={(item) => set({ item })} />
-      </div>
+      {clothing && (
+        <div className="sideblock">
+          <div className="sidehead">ITEM</div>
+          <Chips options={ITEM_TYPES.filter((t) => t !== "All")} active={filters.item}
+            onPick={(item) => set({ item })} />
+        </div>
+      )}
 
       <div className="sideblock">
         <div className="sidehead">STORE</div>
