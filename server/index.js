@@ -30,6 +30,7 @@ export async function runRefresh() {
     d.category = categorize.categorize(d.title);
     d.store = categorize.detectStore(d.title, d.url);
     d.price = categorize.extractPrice(d.title);
+    d.discount_pct = d.discount_pct ?? categorize.extractDiscount(d.title);
   }
   const added = db.upsertDeals(deals);
 
@@ -77,6 +78,9 @@ app.get("/api/deals", (req, res) => {
       maxPrice: num(req.query.max_price),
       minPrice: num(req.query.min_price),
       maxAgeHours: num(req.query.max_age_hours),
+      color: req.query.color,
+      size: req.query.size,
+      minDiscount: num(req.query.min_discount),
       order,
       limit: Math.min(num(req.query.limit) ?? 100, 500),
     }),
@@ -85,6 +89,7 @@ app.get("/api/deals", (req, res) => {
 
 app.get("/api/categories", (_req, res) => res.json({ categories: db.categoryCounts() }));
 app.get("/api/stores", (_req, res) => res.json({ stores: db.storeCounts() }));
+app.get("/api/filters", (_req, res) => res.json(db.filterFacets()));
 
 app.get("/api/status", (_req, res) => {
   res.json({

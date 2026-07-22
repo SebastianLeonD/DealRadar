@@ -144,29 +144,29 @@ button { font-family: inherit; cursor: pointer; }
 .titlerow h2 { margin: 0; font: 400 30px/1.1 var(--serif); letter-spacing: -.4px; }
 .stylecount { margin-left: auto; font: 500 10.5px var(--mono); letter-spacing: 1.4px; color: var(--ink-soft); }
 
-/* ---------- sort / filter controls ---------- */
-.controls { display: flex; gap: 10px; padding-bottom: 24px; align-items: center; flex-wrap: wrap; animation: rise .5s ease .08s both; }
-.pill {
-  display: flex; align-items: center; gap: 8px; border: 1.5px solid var(--ink);
-  background: #fff; padding: 9px 14px; font: 700 11.5px var(--mono); letter-spacing: .8px;
-  color: var(--ink); transition: box-shadow .15s ease, transform .15s ease;
+/* ---------- filter sidebar ---------- */
+.pagegrid { display: grid; grid-template-columns: 230px 1fr; gap: 26px; align-items: start; }
+@media (max-width: 860px) { .pagegrid { grid-template-columns: 1fr; } .sidebar { position: static; } }
+.sidebar {
+  position: sticky; top: 96px; border: 1.5px solid var(--ink); background: #fff;
+  padding: 16px 14px; display: flex; flex-direction: column; gap: 16px;
+  animation: rise .5s ease .08s both;
 }
-.pill:hover { box-shadow: var(--shadow-sm); transform: translate(-1px, -1px); }
-.pill select {
-  border: 0; outline: none; font: 700 11.5px var(--mono); letter-spacing: .8px;
-  background: transparent; cursor: pointer; color: var(--ink); text-transform: uppercase;
+.sideblock { display: flex; flex-direction: column; gap: 7px; }
+.sidehead { font: 700 10px var(--mono); letter-spacing: 1.6px; color: var(--red); }
+.sidehead .sidenote { color: var(--ink-soft); font-weight: 500; }
+.sidebar select, .sidebar input {
+  border: 1.5px solid var(--hairline); background: #fff; padding: 7px 8px;
+  font: 500 12px var(--mono); color: var(--ink); width: 100%;
 }
-.filterpanel {
-  display: none; width: 100%; background: #fff; border: 1.5px solid var(--ink);
-  padding: 16px 18px; gap: 14px; flex-wrap: wrap; align-items: center; box-shadow: var(--shadow);
+.sidebar select:focus, .sidebar input:focus { outline: none; border-color: var(--ink); }
+.pricerow { display: flex; align-items: center; gap: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.clearbtn {
+  border: 1.5px solid var(--ink); background: transparent; color: var(--ink); cursor: pointer;
+  font: 700 10.5px var(--mono); letter-spacing: 1.2px; padding: 8px;
 }
-.filterpanel.open { display: flex; animation: rise .25s ease both; }
-.filterpanel label { font: 700 10px var(--mono); letter-spacing: 1.6px; color: var(--red); }
-.filterpanel select, .filterpanel input {
-  border: 1px solid var(--ink); background: var(--paper); padding: 8px 10px;
-  font: 500 12px var(--mono); outline: none; color: var(--ink);
-}
-.filterpanel input[type=number] { width: 100px; }
+.clearbtn:hover { background: var(--ink); color: var(--paper); }
 .chip {
   display: inline-block; border: 1px solid var(--hairline); background: var(--paper-2);
   padding: 6px 13px; font: 500 11px var(--mono); letter-spacing: .6px;

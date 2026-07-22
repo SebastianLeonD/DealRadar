@@ -25,10 +25,9 @@ const usd = (n) => (Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`);
 // ---------------------------------------------------------------------------
 
 export const ZARA_SALE_CATEGORIES = [
-  { id: 2418848, label: "women" }, // WOMAN > SALE
-  { id: 2439352, label: "men" },   // MAN > SALE > SHOP ALL (top-level MAN SALE id returns empty)
+  { id: 2439352, label: "men" }, // MAN > SALE > SHOP ALL (top-level MAN SALE id returns empty)
 ];
-const ZARA_PER_CATEGORY = 60; // keep the board from becoming all-Zara
+const ZARA_PER_CATEGORY = 120; // keep the board from becoming all-Zara
 
 /** Pure mapper: Zara category-products JSON -> deals, biggest discounts first. */
 export function mapZara(data, limit = ZARA_PER_CATEGORY) {
@@ -47,12 +46,19 @@ export function mapZara(data, limit = ZARA_PER_CATEGORY) {
     const img =
       p.xmedia?.[0]?.extraInfo?.deliveryUrl ??
       p.detail?.colors?.[0]?.xmedia?.[0]?.extraInfo?.deliveryUrl ?? null;
+    const colors = (p.availableColors ?? [])
+      .map((c) => c.colorName?.toLowerCase())
+      .filter(Boolean)
+      .join(",");
     return {
       title: `${p.name} — ${usd(price)} (was ${usd(was)}, ${pct}% off)`,
       url: `https://www.zara.com/us/en/${p.seo.keyword}-p${p.seo.seoProductId}.html`,
       source: "zara.com",
       image_url: img ? `${img}${img.includes("?") ? "&" : "?"}w=560` : null,
       posted_at: null,
+      colors: colors || null,
+      sizes: null, // Zara's listing endpoint has no size data
+      discount_pct: pct,
     };
   });
 }
@@ -72,23 +78,37 @@ export async function fetchZara() {
 // redPrice = sale price, whitePrice = original.
 // ---------------------------------------------------------------------------
 
-const HM_QUERIES = ["dress", "jeans", "shirt", "jacket", "shoes", "hoodie"];
+const HM_QUERIES = ["men jeans", "men shirt", "men jacket", "men shoes", "men hoodie", "men pants"];
 const HM_PAGE_SIZE = 30;
 
-/** Pure mapper: H&M search-results JSON -> deals (sale items only). */
+/** Pure mapper: H&M search-results JSON -> deals (men's sale items only —
+    mainCatCode prefixes are ladies_/men_/kids_/divided_). */
 export function mapHM(data) {
   const deals = [];
   for (const p of data.searchHits?.productList ?? []) {
     const red = p.prices?.find((x) => x.priceType === "redPrice")?.price;
     const white = p.prices?.find((x) => x.priceType === "whitePrice")?.price;
     if (!p.productName || !p.url || !red || !white || red >= white) continue;
+    if (!p.mainCatCode?.startsWith("men_")) continue;
     const pct = Math.round((1 - red / white) * 100);
+    // colorWithNames is "blue_0000ff"-style; take the base color word
+    const colors = [...new Set(
+      [p.colorWithNames, ...(p.colors && Array.isArray(p.colors) ? p.colors : [])]
+        .filter((c) => typeof c === "string" && c.includes("_"))
+        .map((c) => c.split("_")[0].toLowerCase())
+    )].join(",");
+    const sizes = [...new Set(
+      (p.sizes ?? []).filter((s) => s.stock > 0).map((s) => s.label)
+    )].join(",");
     deals.push({
       title: `${p.productName} — ${usd(red)} (was ${usd(white)}, ${pct}% off)`,
       url: `https://www2.hm.com${p.url}`,
       source: "hm.com",
       image_url: p.productImage ?? p.modelImage ?? null,
       posted_at: null,
+      colors: colors || null,
+      sizes: sizes || null,
+      discount_pct: pct,
     });
   }
   return deals;

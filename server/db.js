@@ -21,7 +21,10 @@ CREATE TABLE IF NOT EXISTS deals (
     posted_at   TEXT,                      -- ISO timestamp from the feed, if any
     fetched_at  TEXT NOT NULL DEFAULT (datetime('now')),
     ai_score    INTEGER,                   -- 1-10, NULL until Claude scores it
-    ai_take     TEXT                       -- one-line verdict from Claude
+    ai_take     TEXT,                      -- one-line verdict from Claude
+    colors      TEXT,                      -- comma-joined lowercase color names (scraped sources)
+    sizes       TEXT,                      -- comma-joined in-stock size labels (scraped sources)
+    discount_pct INTEGER                   -- % off, from scraper data or title
 );
 CREATE INDEX IF NOT EXISTS idx_deals_category ON deals(category);
 CREATE INDEX IF NOT EXISTS idx_deals_fetched ON deals(fetched_at);
@@ -39,6 +42,10 @@ function connect() {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   _db = new DatabaseSync(dbPath);
   _db.exec(SCHEMA);
+  // migrate pre-existing DBs (CREATE IF NOT EXISTS won't add new columns)
+  for (const col of ["colors TEXT", "sizes TEXT", "discount_pct INTEGER"]) {
+    try { _db.exec(`ALTER TABLE deals ADD COLUMN ${col}`); } catch { /* exists */ }
+  }
   return _db;
 }
 
@@ -52,8 +59,8 @@ export function resetForTests() {
 export function upsertDeals(deals) {
   const db = connect();
   const stmt = db.prepare(
-    `INSERT OR IGNORE INTO deals (id, title, url, source, category, store, price, image_url, posted_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT OR IGNORE INTO deals (id, title, url, source, category, store, price, image_url, posted_at, colors, sizes, discount_pct)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   let added = 0;
   db.exec("BEGIN");
@@ -61,7 +68,8 @@ export function upsertDeals(deals) {
     for (const d of deals) {
       const res = stmt.run(
         dealId(d.url), d.title, d.url, d.source, d.category ?? "Other",
-        d.store ?? null, d.price ?? null, d.image_url ?? null, d.posted_at ?? null
+        d.store ?? null, d.price ?? null, d.image_url ?? null, d.posted_at ?? null,
+        d.colors ?? null, d.sizes ?? null, d.discount_pct ?? null
       );
       added += Number(res.changes);
     }
@@ -85,9 +93,13 @@ export function unscoredDeals(limit = 30) {
 
 export function listDeals({
   category, q, item, store, maxPrice, minPrice, maxAgeHours, order = "new", limit = 100,
+  color, size, minDiscount,
 } = {}) {
   const clauses = [];
   const params = [];
+  if (color && color !== "All") { clauses.push("colors LIKE ?"); params.push(`%${color.toLowerCase()}%`); }
+  if (size && size !== "All") { clauses.push("(',' || sizes || ',') LIKE ?"); params.push(`%,${size},%`); }
+  if (minDiscount != null) { clauses.push("discount_pct IS NOT NULL AND discount_pct >= ?"); params.push(minDiscount); }
   if (maxAgeHours != null) {
     clauses.push("datetime(COALESCE(posted_at, fetched_at)) >= datetime('now', ?)");
     params.push(`-${maxAgeHours} hours`);
@@ -107,6 +119,22 @@ export function listDeals({
   sql += " LIMIT ?";
   params.push(limit);
   return connect().prepare(sql).all(...params);
+}
+
+/** Distinct colors and sizes with counts, for the filter sidebar. */
+export function filterFacets() {
+  const rows = connect()
+    .prepare("SELECT colors, sizes FROM deals WHERE colors IS NOT NULL OR sizes IS NOT NULL")
+    .all();
+  const count = (map, csv) => {
+    for (const v of (csv ?? "").split(",")) if (v) map.set(v, (map.get(v) ?? 0) + 1);
+  };
+  const colors = new Map();
+  const sizes = new Map();
+  for (const r of rows) { count(colors, r.colors); count(sizes, r.sizes); }
+  const top = (map, n) =>
+    [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([name, count]) => ({ name, count }));
+  return { colors: top(colors, 14), sizes: top(sizes, 14) };
 }
 
 export function categoryCounts() {

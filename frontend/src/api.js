@@ -13,6 +13,10 @@ export function fetchDeals(filters) {
   if (filters.query) params.set("q", filters.query);
   if (filters.store !== "All") params.set("store", filters.store);
   if (filters.maxPrice) params.set("max_price", filters.maxPrice);
+  if (filters.minPrice) params.set("min_price", filters.minPrice);
+  if (filters.color && filters.color !== "All") params.set("color", filters.color);
+  if (filters.size && filters.size !== "All") params.set("size", filters.size);
+  if (filters.minDiscount) params.set("min_discount", filters.minDiscount);
   if (filters.age) params.set("max_age_hours", filters.age);
   params.set("order", filters.order);
   return getJSON("/api/deals?" + params);
@@ -20,6 +24,7 @@ export function fetchDeals(filters) {
 
 export const fetchCategories = () => getJSON("/api/categories");
 export const fetchStores = () => getJSON("/api/stores");
+export const fetchFilters = () => getJSON("/api/filters");
 export const fetchStatus = () => getJSON("/api/status");
 
 export async function postRefresh() {

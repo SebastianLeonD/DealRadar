@@ -7,3 +7,4 @@ Format: date — symptom — root cause — fix.
 - 2026-07-22 — Zara scraper returned 0 men's items — top-level MAN>SALE category id (2721407) returns empty from the products endpoint — use the MAN>SALE>SHOP ALL redirect target (2439352); category ids live in `zara.com/us/en/categories?ajax=true`.
 - 2026-07-22 — H&M `listing/resultpage` endpoint always 0 hits server-side — unknown required categoryId — use `search/resultpage` with `facets=sale:true` + broad queries instead (works without cookies).
 - 2026-07-22 — Deal card images never loaded (blank cards) — `loading="lazy"` on every img; Chrome defers lazy images indefinitely in unfocused/automated windows — first 10 cards now load eager, rest stay lazy.
+- 2026-07-22 — New deal columns (colors/sizes/discount_pct) stayed NULL after deploy — `INSERT OR IGNORE` never backfills existing rows — after adding columns that scrapers populate, purge those sources' rows (`DELETE FROM deals WHERE source IN (...)`) and refresh.

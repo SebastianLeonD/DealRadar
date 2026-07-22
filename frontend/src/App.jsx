@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  fetchCategories, fetchDeals, fetchStatus, fetchStores, postNotify, postRefresh,
+  fetchCategories, fetchDeals, fetchFilters, fetchStatus, fetchStores, postNotify, postRefresh,
 } from "./api.js";
 import DealGrid from "./components/DealGrid.jsx";
 import DealModal from "./components/DealModal.jsx";
-import FilterBar from "./components/FilterBar.jsx";
+import Sidebar from "./components/Sidebar.jsx";
 import SourceLog from "./components/SourceLog.jsx";
 import SubNav from "./components/SubNav.jsx";
 import Ticker from "./components/Ticker.jsx";
@@ -12,7 +12,8 @@ import TopBar from "./components/TopBar.jsx";
 
 const DEFAULT_FILTERS = {
   category: "All", item: "All", query: "", store: "All",
-  maxPrice: "", age: "48", order: "new",
+  minPrice: "", maxPrice: "", age: "48", order: "new",
+  color: "All", size: "All", minDiscount: "",
 };
 
 export default function App() {
@@ -21,6 +22,7 @@ export default function App() {
   const [deals, setDeals] = useState([]);
   const [categories, setCategories] = useState([]);
   const [stores, setStores] = useState([]);
+  const [facets, setFacets] = useState(null);
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -37,13 +39,14 @@ export default function App() {
   const loadAll = useCallback(async () => {
     const effective = { ...filters, order: saleMode ? "best" : filters.order };
     try {
-      const [dealsRes, catsRes, storesRes, statusRes] = await Promise.all([
-        fetchDeals(effective), fetchCategories(), fetchStores(), fetchStatus(),
+      const [dealsRes, catsRes, storesRes, statusRes, facetsRes] = await Promise.all([
+        fetchDeals(effective), fetchCategories(), fetchStores(), fetchStatus(), fetchFilters(),
       ]);
       setDeals(dealsRes.deals);
       setCategories(catsRes.categories);
       setStores(storesRes.stores);
       setStatus(statusRes);
+      setFacets(facetsRes);
     } catch (e) {
       showToast("Couldn't reach the DealRadar API — is the backend running?");
     }
@@ -120,9 +123,13 @@ export default function App() {
             {deals.length} DEAL{deals.length === 1 ? "" : "S"} ON THE WIRE
           </span>
         </div>
-        <FilterBar filters={filters} stores={stores} saleMode={saleMode} onChange={patchFilters} />
         <SourceLog status={status} />
-        <DealGrid deals={deals} loading={loading} onOpen={setOpenIndex} />
+        <div className="pagegrid">
+          <Sidebar filters={filters} stores={stores} facets={facets} saleMode={saleMode} onChange={patchFilters} />
+          <main>
+            <DealGrid deals={deals} loading={loading} onOpen={setOpenIndex} />
+          </main>
+        </div>
       </div>
       <DealModal deal={openIndex != null ? deals[openIndex] : null} onClose={() => setOpenIndex(null)} />
       {toast ? <div className="toast show">{toast}</div> : null}

@@ -99,6 +99,14 @@ export function extractPrice(title) {
   return m ? parseFloat(m[1].replace(/,/g, "")) : null;
 }
 
+const DISCOUNT_RE = /(\d{1,2})\s?%\s*off/i;
+
+/** Pull a "% off" figure out of a deal title, null if none. */
+export function extractDiscount(title) {
+  const m = DISCOUNT_RE.exec(title);
+  return m ? parseInt(m[1], 10) : null;
+}
+
 /** Identify the retailer from the deal URL domain (preferred) or title.
     The domain wins: "Levi's jeans at Amazon" linking to amazon.com is an
     Amazon deal, not a Levi's-store deal. */

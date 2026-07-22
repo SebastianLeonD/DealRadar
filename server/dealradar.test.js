@@ -119,20 +119,23 @@ describe("scraper mappers", () => {
     expect(detectStore(deals[0].title, deals[0].url)).toBe("Zara");
   });
 
-  it("maps H&M sale items and skips full-price ones", () => {
+  it("maps men's H&M sale items, skips full-price and non-men's", () => {
     const data = {
       searchHits: {
         productList: [
-          { productName: "Ruffle Dress", url: "/en_us/productpage.1.html", productImage: "https://image.hm.com/a.jpg",
+          { productName: "Loose Jeans", url: "/en_us/productpage.1.html", productImage: "https://image.hm.com/a.jpg",
+            mainCatCode: "men_jeans_loose",
             prices: [{ priceType: "redPrice", price: 3.99 }, { priceType: "whitePrice", price: 9.99 }] },
-          { productName: "Full Price Dress", url: "/en_us/productpage.2.html",
+          { productName: "Full Price Jeans", url: "/en_us/productpage.2.html", mainCatCode: "men_jeans_loose",
             prices: [{ priceType: "whitePrice", price: 19.99 }] },
+          { productName: "Ruffle Dress", url: "/en_us/productpage.3.html", mainCatCode: "ladies_dresses_mididresses",
+            prices: [{ priceType: "redPrice", price: 3.99 }, { priceType: "whitePrice", price: 9.99 }] },
         ],
       },
     };
     const deals = mapHM(data);
     expect(deals).toHaveLength(1);
-    expect(deals[0].title).toBe("Ruffle Dress — $3.99 (was $9.99, 60% off)");
+    expect(deals[0].title).toBe("Loose Jeans — $3.99 (was $9.99, 60% off)");
     expect(deals[0].url).toBe("https://www2.hm.com/en_us/productpage.1.html");
     expect(detectStore(deals[0].title, deals[0].url)).toBe("H&M");
   });
