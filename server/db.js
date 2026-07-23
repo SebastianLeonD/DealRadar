@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS deals (
     id          TEXT PRIMARY KEY,          -- sha1 of the deal URL
     title       TEXT NOT NULL,
     url         TEXT NOT NULL,
-    source      TEXT NOT NULL,             -- e.g. 'slickdeals', 'r/deals'
+    source      TEXT NOT NULL,             -- e.g. 'zara.com', 'nike.com'
     category    TEXT NOT NULL DEFAULT 'Other',
     store       TEXT,                      -- retailer: Amazon, Zara, ASOS, ...
     price       REAL,                      -- extracted from title, NULL if none found
@@ -91,14 +91,19 @@ export function unscoredDeals(limit = 30) {
     .all(limit);
 }
 
-export function listDeals({
-  category, q, item, store, maxPrice, minPrice, maxAgeHours, order = "new", limit = 100,
-  color, size, minDiscount,
-} = {}) {
+function buildClauses({
+  category, q, items, store, maxPrice, minPrice, maxAgeHours, colors, sizes, minDiscount,
+}) {
   const clauses = [];
   const params = [];
-  if (color && color !== "All") { clauses.push("colors LIKE ?"); params.push(`%${color.toLowerCase()}%`); }
-  if (size && size !== "All") { clauses.push("(',' || sizes || ',') LIKE ?"); params.push(`%,${size},%`); }
+  if (colors?.length) {
+    clauses.push("(" + colors.map(() => "colors LIKE ?").join(" OR ") + ")");
+    for (const c of colors) params.push(`%${c.toLowerCase()}%`);
+  }
+  if (sizes?.length) {
+    clauses.push("(" + sizes.map(() => "(',' || sizes || ',') LIKE ?").join(" OR ") + ")");
+    for (const s of sizes) params.push(`%,${s},%`);
+  }
   if (minDiscount != null) { clauses.push("discount_pct IS NOT NULL AND discount_pct >= ?"); params.push(minDiscount); }
   if (maxAgeHours != null) {
     clauses.push("datetime(COALESCE(posted_at, fetched_at)) >= datetime('now', ?)");
@@ -106,19 +111,70 @@ export function listDeals({
   }
   if (category && category !== "All") { clauses.push("category = ?"); params.push(category); }
   if (q) { clauses.push("title LIKE ?"); params.push(`%${q}%`); }
-  if (item && item !== "All") { clauses.push("title LIKE ?"); params.push(`%${item}%`); }
+  if (items?.length) {
+    // word-boundary match via GLOB (space padding covers string start/end) —
+    // plain LIKE '%tee%' matched "Steelbook" and "Stainless Steel". OR the
+    // per-word groups so multiple item types widen the result set.
+    const groups = items.map(() => "((' '||lower(title)||' ') GLOB ? OR (' '||lower(title)||' ') GLOB ?)");
+    clauses.push("(" + groups.join(" OR ") + ")");
+    for (const item of items) {
+      const w = item.toLowerCase().replace(/[^a-z0-9-]/g, "");
+      params.push(`*[^a-z0-9]${w}[^a-z0-9]*`, `*[^a-z0-9]${w}s[^a-z0-9]*`);
+    }
+  }
   if (store && store !== "All") { clauses.push("store = ?"); params.push(store); }
   if (maxPrice != null) { clauses.push("price IS NOT NULL AND price <= ?"); params.push(maxPrice); }
   if (minPrice != null) { clauses.push("price IS NOT NULL AND price >= ?"); params.push(minPrice); }
+  return { where: clauses.length ? " WHERE " + clauses.join(" AND ") : "", params };
+}
 
-  let sql = "SELECT * FROM deals";
-  if (clauses.length) sql += " WHERE " + clauses.join(" AND ");
+export function listDeals({ order = "new", limit = 100, ...filters } = {}) {
+  const { where, params } = buildClauses(filters);
+  let sql = "SELECT * FROM deals" + where;
   sql += order === "best"
     ? " ORDER BY ai_score IS NULL, ai_score DESC, datetime(COALESCE(posted_at, fetched_at)) DESC"
     : " ORDER BY datetime(COALESCE(posted_at, fetched_at)) DESC";
   sql += " LIMIT ?";
-  params.push(limit);
-  return connect().prepare(sql).all(...params);
+  return connect().prepare(sql).all(...params, limit);
+}
+
+/** Total rows matching the same filters listDeals takes (ignores limit). */
+export function countDeals(filters = {}) {
+  const { where, params } = buildClauses(filters);
+  return connect().prepare("SELECT COUNT(*) AS n FROM deals" + where).get(...params).n;
+}
+
+/** Scraped catalogs change between refreshes: sync price/title/etc for rows
+    we already have (INSERT OR IGNORE never updates them). */
+export function refreshDealData(deals) {
+  const db = connect();
+  const stmt = db.prepare(
+    `UPDATE deals SET title = ?, price = ?, image_url = ?, colors = ?, sizes = ?, discount_pct = ?
+     WHERE id = ?`
+  );
+  db.exec("BEGIN");
+  try {
+    for (const d of deals) {
+      stmt.run(d.title, d.price ?? null, d.image_url ?? null, d.colors ?? null,
+        d.sizes ?? null, d.discount_pct ?? null, dealId(d.url));
+    }
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+/** Remove rows for a scraped source that vanished from its latest fetch
+    (deal expired / product left the sale). Returns count removed. */
+export function pruneMissing(source, keepUrls) {
+  const db = connect();
+  const keep = new Set(keepUrls.map(dealId));
+  const rows = db.prepare("SELECT id FROM deals WHERE source = ?").all(source);
+  const stale = rows.filter((r) => !keep.has(r.id));
+  const stmt = db.prepare("DELETE FROM deals WHERE id = ?");
+  for (const r of stale) stmt.run(r.id);
+  return stale.length;
 }
 
 /** Distinct colors and sizes with counts, for the filter sidebar. */

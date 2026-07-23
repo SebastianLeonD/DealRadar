@@ -1,7 +1,7 @@
 // Deal categorization: keyword categories (always on), store detection,
 // price extraction, and optional Claude scoring when ANTHROPIC_API_KEY is set.
 
-export const CATEGORIES = ["Tech", "Clothing", "Gaming", "Home", "Beauty", "Food", "Sports", "Other"];
+export const CATEGORIES = ["Tech", "Clothing", "Home", "Beauty", "Food", "Sports", "Other"];
 
 const KEYWORDS = {
   Tech: [
@@ -17,11 +17,6 @@ const KEYWORDS = {
     "shoe", "boot", "sock", "underwear", "coat", "sweater", "levi", "nike",
     "adidas", "uniqlo", "polo", "dress", "shorts", "hat", "beanie", "flannel",
     "denim", "loafers", "apparel",
-  ],
-  Gaming: [
-    "game", "steam", "playstation", "ps5", "xbox", "nintendo", "switch",
-    "controller", "dlc", "gog", "epic games", "console", "joy-con", "gamepass",
-    "game pass", "psn",
   ],
   Home: [
     "vacuum", "roomba", "air fryer", "instant pot", "mattress", "pillow",
@@ -80,13 +75,24 @@ const STORES = [
 
 const PRICE_RE = /\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)/;
 
+// Word-boundary matchers (with optional plural) — substring matching tagged
+// "Stainless Steel" as Clothing because "Steel" contains "tee".
+const WORD_RE = new Map();
+export function wordMatch(text, word) {
+  let re = WORD_RE.get(word);
+  if (!re) {
+    re = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}s?\\b`, "i");
+    WORD_RE.set(word, re);
+  }
+  return re.test(text);
+}
+
 /** Keyword-based category for a deal title. */
 export function categorize(title) {
-  const lower = title.toLowerCase();
   let best = "Other";
   let bestHits = 0;
   for (const [category, words] of Object.entries(KEYWORDS)) {
-    const hits = words.reduce((n, w) => n + (lower.includes(w) ? 1 : 0), 0);
+    const hits = words.reduce((n, w) => n + (wordMatch(title, w) ? 1 : 0), 0);
     if (hits > bestHits) { best = category; bestHits = hits; }
   }
   return best;

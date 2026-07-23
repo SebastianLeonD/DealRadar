@@ -151,7 +151,12 @@ button { font-family: inherit; cursor: pointer; }
   position: sticky; top: 96px; border: 1.5px solid var(--ink); background: #fff;
   padding: 16px 14px; display: flex; flex-direction: column; gap: 16px;
   animation: rise .5s ease .08s both;
+  max-height: calc(100vh - 120px); overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--hairline) transparent;
 }
+.sidebar::-webkit-scrollbar { width: 7px; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--hairline); }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
 .sideblock { display: flex; flex-direction: column; gap: 7px; }
 .sidehead { font: 700 10px var(--mono); letter-spacing: 1.6px; color: var(--red); }
 .sidehead .sidenote { color: var(--ink-soft); font-weight: 500; }
@@ -297,3 +302,9 @@ a.gobtn:hover { background: var(--red); border-color: var(--red); box-shadow: va
 .sourcelog-row.skip { color: var(--ink-soft); font-style: italic; }
 .sourcelog-row .srcname { width: 190px; flex-shrink: 0; }
 .sourcelog-row .srcinfo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.showmore {
+  display: block; margin: 26px auto 0; border: 1.5px solid var(--ink); background: transparent;
+  color: var(--ink); cursor: pointer; font: 700 11.5px var(--mono); letter-spacing: 1.4px; padding: 12px 26px;
+}
+.showmore:hover { background: var(--ink); color: var(--paper); box-shadow: var(--shadow-sm); }

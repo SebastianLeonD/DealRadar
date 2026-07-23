@@ -1,98 +1,16 @@
-// Deal feed fetchers. All sources are free public RSS/Atom feeds — no API keys.
-import Parser from "rss-parser";
+// Deal feed fetchers. All sources are direct retailer scrapers — no API keys
+// beyond the optional Best Buy one.
 import { SCRAPERS } from "./stores/index.js";
 
-// Per-store Slickdeals search feeds cover retailers whose own sites block
-// server-side requests (Akamai 403): Hollister, PacSun, ASOS — plus Amazon,
-// where Slickdeals' human curation beats scraping anyway.
-const sdSearch = (q) => ({
-  name: `slickdeals:${q}`,
-  url: `https://slickdeals.net/newsearch.php?q=${encodeURIComponent(q)}&searcharea=deals&searchin=first&rss=1`,
-});
-
-export const FEEDS = [
-  {
-    name: "slickdeals",
-    url: "https://slickdeals.net/newsearch.php?mode=frontpage&searcharea=deals&searchin=first&rss=1",
-  },
-  sdSearch("hollister"),
-  sdSearch("pacsun"),
-  sdSearch("asos"),
-  sdSearch("amazon"),
-  sdSearch("uniqlo"), // Uniqlo's own API hides sale prices; Slickdeals covers it
-
-];
-
-/** Every source — RSS feeds and direct retailer scrapers — as {name, fetch}. */
-export const ALL_SOURCES = [
-  ...FEEDS.map((f) => ({ name: f.name, fetch: () => fetchFeed(f.name, f.url) })),
-  ...SCRAPERS,
-];
-
-const parser = new Parser({
-  timeout: 15000,
-  headers: { "User-Agent": "DealRadar/0.4 (personal deal aggregator)" },
-  customFields: {
-    item: [
-      ["media:thumbnail", "mediaThumbnail", { keepArray: true }],
-      ["media:content", "mediaContent", { keepArray: true }],
-    ],
-  },
-});
-
-const IMG_RE = /<img[^>]+src=["']([^"']+)["']/i;
-
-function unescapeHtml(s) {
-  return s
-    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"').replace(/&#0?39;/g, "'");
-}
-
-/** Best product image for a feed entry: media:thumbnail / media:content on
-    Reddit Atom entries, else the first <img> in the entry's HTML body
-    (Slickdeals and Reddit link posts embed one). */
-export function entryImage(item) {
-  for (const key of ["mediaThumbnail", "mediaContent"]) {
-    for (const m of item[key] ?? []) {
-      const url = m?.$?.url;
-      if (url && url.startsWith("http")) return unescapeHtml(url);
-    }
-  }
-  for (const html of [item.content, item["content:encoded"], item.summary]) {
-    if (!html) continue;
-    const m = IMG_RE.exec(html);
-    if (m) {
-      const url = unescapeHtml(m[1]);
-      if (url.startsWith("http")) return url;
-    }
-  }
-  return null;
-}
-
-export async function fetchFeed(name, url) {
-  const feed = await parser.parseURL(url);
-  const deals = [];
-  for (const item of feed.items ?? []) {
-    const title = (item.title ?? "").trim();
-    const link = (item.link ?? "").trim();
-    if (!title || !link) continue;
-    deals.push({
-      title,
-      url: link,
-      source: name,
-      image_url: entryImage(item),
-      posted_at: item.isoDate ?? null,
-    });
-  }
-  return deals;
-}
+/** Every source — the direct retailer scrapers — as {name, fetch}. */
+export const ALL_SOURCES = [...SCRAPERS];
 
 // After a rate-limit (429), skip the source for a while instead of hammering
 // it every refresh. In-memory: source name -> epoch ms until which to skip.
 const COOLDOWN_MS = 30 * 60 * 1000;
 const coolingUntil = new Map();
 
-/** Fetch every source (feeds + scrapers). Returns {deals, errors, health} —
+/** Fetch every source (scrapers). Returns {deals, errors, health} —
     one source failing never blocks the rest; health has a row per source. */
 export async function fetchAll() {
   const deals = [];

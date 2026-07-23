@@ -3,7 +3,7 @@
 //   npm run build   (once, builds frontend/dist)
 //   npm start       -> http://localhost:8000
 //
-// Feeds are re-fetched automatically every DEALRADAR_REFRESH_MINUTES (default 15).
+// Sources are re-fetched automatically every DEALRADAR_REFRESH_MINUTES (default 15).
 import "dotenv/config";
 import express from "express";
 import { existsSync } from "node:fs";
@@ -14,6 +14,7 @@ import * as categorize from "./categorize.js";
 import * as db from "./db.js";
 import * as notify from "./notify.js";
 import * as sources from "./sources.js";
+import { SCRAPERS } from "./stores/index.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = path.join(ROOT, "frontend", "dist");
@@ -23,17 +24,28 @@ const REFRESH_MINUTES = Number(process.env.DEALRADAR_REFRESH_MINUTES || 15);
 const lastRefresh = { at: null, result: null };
 const refreshLog = []; // newest first, last 20 refreshes, in-memory
 
-/** Fetch all feeds, store new deals, categorize, and (if enabled) AI-score them. */
+/** Fetch all sources, store new deals, categorize, and (if enabled) AI-score them. */
 export async function runRefresh() {
   const { deals, errors, health } = await sources.fetchAll();
   for (const d of deals) {
-    // direct store fetchers pre-set these; feeds derive them from the title
+    // direct store fetchers pre-set these; fall back to title-derived values
     d.category = d.category ?? categorize.categorize(d.title);
     d.store = d.store ?? categorize.detectStore(d.title, d.url);
     d.price = d.price ?? categorize.extractPrice(d.title);
     d.discount_pct = d.discount_pct ?? categorize.extractDiscount(d.title);
   }
   const added = db.upsertDeals(deals);
+
+  // scraped catalogs are live state, not posts: sync changed prices and drop
+  // rows whose product left the store's sale (stale-deal fix)
+  let pruned = 0;
+  const scraperNames = new Set(SCRAPERS.map((s) => s.name));
+  for (const h of health) {
+    if (!h.ok || !scraperNames.has(h.source)) continue;
+    const current = deals.filter((d) => d.source === h.source);
+    db.refreshDealData(current);
+    pruned += db.pruneMissing(h.source, current.map((d) => d.url));
+  }
 
   let scored = 0;
   let aiError = null;
@@ -53,6 +65,7 @@ export async function runRefresh() {
     at: new Date().toISOString(),
     fetched: deals.length,
     new: added,
+    pruned,
     ai_scored: scored,
     ai_error: aiError,
     source_errors: errors,
@@ -69,22 +82,23 @@ const app = express();
 
 app.get("/api/deals", (req, res) => {
   const num = (v) => (v === undefined || v === "" ? null : Number(v));
+  const list = (v) => (v ? String(v).split(",").filter(Boolean) : []);
   const order = req.query.order === "best" ? "best" : "new";
+  const filters = {
+    category: req.query.category,
+    q: req.query.q,
+    items: list(req.query.items),
+    store: req.query.store,
+    maxPrice: num(req.query.max_price),
+    minPrice: num(req.query.min_price),
+    maxAgeHours: num(req.query.max_age_hours),
+    colors: list(req.query.colors),
+    sizes: list(req.query.sizes),
+    minDiscount: num(req.query.min_discount),
+  };
   res.json({
-    deals: db.listDeals({
-      category: req.query.category,
-      q: req.query.q,
-      item: req.query.item,
-      store: req.query.store,
-      maxPrice: num(req.query.max_price),
-      minPrice: num(req.query.min_price),
-      maxAgeHours: num(req.query.max_age_hours),
-      color: req.query.color,
-      size: req.query.size,
-      minDiscount: num(req.query.min_discount),
-      order,
-      limit: Math.min(num(req.query.limit) ?? 100, 500),
-    }),
+    deals: db.listDeals({ ...filters, order, limit: Math.min(num(req.query.limit) ?? 100, 1000) }),
+    total: db.countDeals(filters),
   });
 });
 

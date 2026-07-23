@@ -6,12 +6,15 @@ const DISCOUNTS = [
   { value: "70", label: "70%+" },
 ];
 
-function Chips({ options, active, onPick, format = (v) => v }) {
+// Multiselect: clicking a chip toggles it in/out of the `selected` array.
+function Chips({ options, selected, onToggle, format = (v) => v }) {
+  const toggle = (o) =>
+    onToggle(selected.includes(o) ? selected.filter((x) => x !== o) : [...selected, o]);
   return (
     <div className="chips">
       {options.map((o) => (
-        <span key={o} className={`chip ${o === active ? "active" : ""}`}
-          onClick={() => onPick(o === active ? "All" : o)}>
+        <span key={o} className={`chip ${selected.includes(o) ? "active" : ""}`}
+          onClick={() => toggle(o)}>
           {format(o)}
         </span>
       ))}
@@ -44,8 +47,8 @@ export default function Sidebar({ filters, category = "All", stores, facets, sal
       {clothing && (
         <div className="sideblock">
           <div className="sidehead">ITEM</div>
-          <Chips options={ITEM_TYPES.filter((t) => t !== "All")} active={filters.item}
-            onPick={(item) => set({ item })} />
+          <Chips options={ITEM_TYPES.filter((t) => t !== "All")} selected={filters.items}
+            onToggle={(items) => set({ items })} />
         </div>
       )}
 
@@ -85,16 +88,16 @@ export default function Sidebar({ filters, category = "All", stores, facets, sal
       {sizes.length > 0 && (
         <div className="sideblock">
           <div className="sidehead">SIZE <span className="sidenote">(ZARA/H&M ITEMS)</span></div>
-          <Chips options={sizes.map((s) => s.name)} active={filters.size}
-            onPick={(size) => set({ size })} />
+          <Chips options={sizes.map((s) => s.name)} selected={filters.sizes}
+            onToggle={(sizes) => set({ sizes })} />
         </div>
       )}
 
       {colors.length > 0 && (
         <div className="sideblock">
           <div className="sidehead">COLOR</div>
-          <Chips options={colors.map((c) => c.name)} active={filters.color}
-            onPick={(color) => set({ color })}
+          <Chips options={colors.map((c) => c.name)} selected={filters.colors}
+            onToggle={(colors) => set({ colors })}
             format={(c) => c.charAt(0).toUpperCase() + c.slice(1)} />
         </div>
       )}
@@ -110,7 +113,7 @@ export default function Sidebar({ filters, category = "All", stores, facets, sal
       </div>
 
       <button className="clearbtn" onClick={() => set({
-        item: "All", store: "All", color: "All", size: "All",
+        items: [], store: "All", colors: [], sizes: [],
         minDiscount: "", minPrice: "", maxPrice: "", age: "48",
       })}>
         CLEAR FILTERS

@@ -1,7 +1,6 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import Parser from "rss-parser";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { categorize, detectStore, extractPrice } from "./categorize.js";
@@ -9,18 +8,20 @@ import * as db from "./db.js";
 import { mapHM } from "./stores/hm.js";
 import { mapIkea } from "./stores/ikea.js";
 import { mapNike } from "./stores/nike.js";
-import { mapSteam } from "./stores/steam.js";
 import { mapZara } from "./stores/zara.js";
-import { entryImage } from "./sources.js";
 
 describe("categorize", () => {
-  it("buckets tech, clothing, gaming", () => {
+  it("buckets tech and clothing", () => {
     expect(categorize('Samsung 55" OLED TV + soundbar bundle $899')).toBe("Tech");
     expect(categorize("Levi's 501 jeans 40% off at Amazon")).toBe("Clothing");
-    expect(categorize("PS5 DualSense controller $49")).toBe("Gaming");
   });
   it("falls back to Other", () => {
     expect(categorize("zzz completely unrelated thing")).toBe("Other");
+  });
+  it("matches whole words only — 'Steel' is not 'tee'", () => {
+    expect(categorize("20-Piece Oneida Stainless Steel Flatware Set $35")).not.toBe("Clothing");
+    expect(categorize("Disney Tron Steelbook (4K UHD) $26.70")).not.toBe("Clothing");
+    expect(categorize("Nike graphic tees 2 for $30")).toBe("Clothing");
   });
 });
 
@@ -52,49 +53,6 @@ describe("detectStore", () => {
   });
   it("returns null when unknown", () => {
     expect(detectStore("Random local shop clearance")).toBeNull();
-  });
-});
-
-describe("entryImage", () => {
-  const parser = new Parser({
-    customFields: { item: [["media:thumbnail", "mediaThumbnail", { keepArray: true }]] },
-  });
-
-  it("reads media:thumbnail from reddit-style atom", async () => {
-    const atom = `<?xml version="1.0" encoding="UTF-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
-  <entry>
-    <title>Nike Killshot 2 $63.71</title>
-    <link href="https://www.reddit.com/r/frugalmalefashion/comments/abc/x/"/>
-    <updated>2099-01-01T00:00:00+00:00</updated>
-    <media:thumbnail url="https://external-preview.redd.it/killshot.jpg?width=640&amp;s=tok"/>
-  </entry>
-</feed>`;
-    const feed = await parser.parseString(atom);
-    expect(entryImage(feed.items[0])).toBe("https://external-preview.redd.it/killshot.jpg?width=640&s=tok");
-  });
-
-  it("reads the first <img> from slickdeals-style html descriptions", async () => {
-    const rss = `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0"><channel><title>Slickdeals</title>
-  <item>
-    <title>LG C4 65" OLED TV $1,299.99</title>
-    <link>https://slickdeals.net/f/123-lg-c4</link>
-    <description>&lt;img src="https://static.slickdealscdn.com/attachment/lgc4.jpg" /&gt; great TV deal</description>
-  </item>
-</channel></rss>`;
-    const feed = await parser.parseString(rss);
-    expect(entryImage(feed.items[0])).toBe("https://static.slickdealscdn.com/attachment/lgc4.jpg");
-  });
-
-  it("returns null when there is no image", async () => {
-    const rss = `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0"><channel><title>x</title>
-  <item><title>Plain deal $5</title><link>https://x.test/plain</link>
-  <description>no picture here</description></item>
-</channel></rss>`;
-    const feed = await parser.parseString(rss);
-    expect(entryImage(feed.items[0])).toBeNull();
   });
 });
 
@@ -191,27 +149,6 @@ describe("ikea mapper", () => {
   });
 });
 
-describe("steam mapper", () => {
-  it("maps specials with preset category/store", () => {
-    const data = {
-      specials: {
-        items: [
-          { name: "Palworld", id: 1623730, discounted: true, discount_percent: 30,
-            final_price: 2099, original_price: 2999, large_capsule_image: "https://img.test/pal.jpg" },
-          { name: "Not discounted", id: 2, discounted: false },
-        ],
-      },
-    };
-    const deals = mapSteam(data);
-    expect(deals).toHaveLength(1);
-    expect(deals[0].title).toBe("Palworld — $20.99 (was $29.99, 30% off)");
-    expect(deals[0].url).toBe("https://store.steampowered.com/app/1623730");
-    expect(deals[0].category).toBe("Gaming");
-    expect(deals[0].store).toBe("Steam");
-    expect(deals[0].discount_pct).toBe(30);
-  });
-});
-
 describe("db", () => {
   beforeEach(() => {
     process.env.DEALRADAR_DB = path.join(mkdtempSync(path.join(tmpdir(), "dr-")), "test.db");
@@ -236,8 +173,9 @@ describe("db", () => {
       { title: "ASOS jeans $25", url: "https://x.test/2", source: "t", category: "Clothing", store: "ASOS", price: 25 },
       { title: "Hollister shorts, no price listed", url: "https://x.test/3", source: "t", category: "Clothing", store: "Hollister" },
     ]);
-    expect(db.listDeals({ item: "jeans", maxPrice: 30 }).map((d) => d.store)).toEqual(["ASOS"]);
+    expect(db.listDeals({ items: ["jeans"], maxPrice: 30 }).map((d) => d.store)).toEqual(["ASOS"]);
     expect(db.listDeals({ store: "Hollister" })).toHaveLength(1);
+    expect(db.countDeals({ items: ["jeans"] })).toBe(2);
     expect(db.listDeals({ maxPrice: 1000 })).toHaveLength(2); // no-price deals excluded
     expect(new Set(db.storeCounts().map((s) => s.store))).toEqual(new Set(["Amazon", "ASOS", "Hollister"]));
   });
@@ -250,6 +188,42 @@ describe("db", () => {
     expect(db.listDeals({ maxAgeHours: 48 }).map((d) => d.title)).toEqual(["fresh deal $10"]);
     expect(db.listDeals({ order: "new" })[0].title).toBe("fresh deal $10");
     expect(db.listDeals()).toHaveLength(2);
+  });
+
+  it("item filter matches whole words, not substrings", () => {
+    db.upsertDeals([
+      { title: "Disney Tron Steelbook $26.70", url: "https://x.test/s1", source: "t", category: "Other" },
+      { title: "Graphic Tee 2-pack $15", url: "https://x.test/s2", source: "t", category: "Clothing" },
+      { title: "Plain tees $12", url: "https://x.test/s3", source: "t", category: "Clothing" },
+    ]);
+    expect(db.listDeals({ items: ["Tee"] }).map((d) => d.url)).toEqual(
+      expect.arrayContaining(["https://x.test/s2", "https://x.test/s3"])
+    );
+    expect(db.listDeals({ items: ["Tee"] })).toHaveLength(2);
+  });
+
+  it("multiselect items ORs word-boundary matches, still excludes substrings", () => {
+    db.upsertDeals([
+      { title: "Disney Tron Steelbook $26.70", url: "https://x.test/m1", source: "t", category: "Other" },
+      { title: "Graphic Tee 2-pack $15", url: "https://x.test/m2", source: "t", category: "Clothing" },
+      { title: "Fleece Hoodie $30", url: "https://x.test/m3", source: "t", category: "Clothing" },
+    ]);
+    expect(db.listDeals({ items: ["Tee", "Hoodie"] }).map((d) => d.url).sort()).toEqual(
+      ["https://x.test/m2", "https://x.test/m3"]
+    );
+  });
+
+  it("refreshes scraped rows and prunes vanished ones", () => {
+    db.upsertDeals([
+      { title: "Jacket — $20 (was $100, 80% off)", url: "https://z.test/1", source: "zara.com", category: "Clothing", price: 20 },
+      { title: "Tee — $5", url: "https://z.test/2", source: "zara.com", category: "Clothing", price: 5 },
+    ]);
+    db.refreshDealData([{ title: "Jacket — $25 (was $100, 75% off)", url: "https://z.test/1", price: 25 }]);
+    expect(db.pruneMissing("zara.com", ["https://z.test/1"])).toBe(1);
+    const rows = db.listDeals();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].price).toBe(25);
+    expect(rows[0].title).toContain("75% off");
   });
 
   it("counts categories", () => {

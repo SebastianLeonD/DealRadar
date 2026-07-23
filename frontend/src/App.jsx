@@ -11,14 +11,16 @@ import Ticker from "./components/Ticker.jsx";
 import TopBar from "./components/TopBar.jsx";
 
 const DEFAULT_FILTERS = {
-  category: "All", item: "All", query: "", store: "All",
+  category: "All", items: [], query: "", store: "All",
   minPrice: "", maxPrice: "", age: "48", order: "new",
-  color: "All", size: "All", minDiscount: "",
+  colors: [], sizes: [], minDiscount: "",
 };
 
 export default function App() {
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [saleMode, setSaleMode] = useState(false);
+  const [limit, setLimit] = useState(100);
+  const [total, setTotal] = useState(0);
   const [deals, setDeals] = useState([]);
   const [categories, setCategories] = useState([]);
   const [stores, setStores] = useState([]);
@@ -37,12 +39,13 @@ export default function App() {
   };
 
   const loadAll = useCallback(async () => {
-    const effective = { ...filters, order: saleMode ? "best" : filters.order };
+    const effective = { ...filters, limit, order: saleMode ? "best" : filters.order };
     try {
       const [dealsRes, catsRes, storesRes, statusRes, facetsRes] = await Promise.all([
         fetchDeals(effective), fetchCategories(), fetchStores(filters.category), fetchStatus(), fetchFilters(),
       ]);
       setDeals(dealsRes.deals);
+      setTotal(dealsRes.total ?? dealsRes.deals.length);
       setCategories(catsRes.categories);
       setStores(storesRes.stores);
       setStatus(statusRes);
@@ -51,7 +54,7 @@ export default function App() {
       showToast("Couldn't reach the DealRadar API — is the backend running?");
     }
     setLoading(false);
-  }, [filters, saleMode]);
+  }, [filters, saleMode, limit]);
 
   // reload on any filter change (debounced for typing), plus a 60s live poll
   useEffect(() => {
@@ -69,6 +72,7 @@ export default function App() {
       const { saleMode: _, ...rest } = patch;
       patch = rest;
     }
+    setLimit(100); // filter change resets paging
     if (Object.keys(patch).length) setFilters((f) => ({ ...f, ...patch }));
   };
 
@@ -115,7 +119,7 @@ export default function App() {
         onCategory={(category) => {
           setSaleMode(false);
           // section change resets section-specific filters
-          patchFilters({ category, store: "All", item: "All", size: "All", color: "All" });
+          patchFilters({ category, store: "All", items: [], sizes: [], colors: [] });
         }}
         onToggleSale={() => setSaleMode((s) => !s)}
       />
@@ -124,7 +128,7 @@ export default function App() {
         <div className="titlerow">
           <h2>{saleMode ? "The Hot List" : `Today's Board — ${catLabel}`}</h2>
           <span className="stylecount">
-            {deals.length} DEAL{deals.length === 1 ? "" : "S"} ON THE WIRE
+            {total > deals.length ? `${deals.length} OF ${total}` : deals.length} DEAL{total === 1 ? "" : "S"} ON THE WIRE
           </span>
         </div>
         <SourceLog status={status} />
@@ -132,6 +136,11 @@ export default function App() {
           <Sidebar filters={filters} category={filters.category} stores={stores} facets={facets} saleMode={saleMode} onChange={patchFilters} />
           <main>
             <DealGrid deals={deals} loading={loading} onOpen={setOpenIndex} />
+            {total > deals.length && (
+              <button className="showmore" onClick={() => setLimit((l) => l + 100)}>
+                ▾ SHOW MORE ({total - deals.length} REMAINING)
+              </button>
+            )}
           </main>
         </div>
       </div>

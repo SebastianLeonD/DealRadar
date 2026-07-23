@@ -9,16 +9,17 @@ async function getJSON(path) {
 export function fetchDeals(filters) {
   const params = new URLSearchParams();
   if (filters.category !== "All") params.set("category", filters.category);
-  if (filters.item !== "All") params.set("item", filters.item);
+  if (filters.items?.length) params.set("items", filters.items.join(","));
   if (filters.query) params.set("q", filters.query);
   if (filters.store !== "All") params.set("store", filters.store);
   if (filters.maxPrice) params.set("max_price", filters.maxPrice);
   if (filters.minPrice) params.set("min_price", filters.minPrice);
-  if (filters.color && filters.color !== "All") params.set("color", filters.color);
-  if (filters.size && filters.size !== "All") params.set("size", filters.size);
+  if (filters.colors?.length) params.set("colors", filters.colors.join(","));
+  if (filters.sizes?.length) params.set("sizes", filters.sizes.join(","));
   if (filters.minDiscount) params.set("min_discount", filters.minDiscount);
   if (filters.age) params.set("max_age_hours", filters.age);
   params.set("order", filters.order);
+  if (filters.limit) params.set("limit", filters.limit);
   return getJSON("/api/deals?" + params);
 }
 
