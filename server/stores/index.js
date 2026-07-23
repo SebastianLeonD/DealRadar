@@ -5,9 +5,17 @@
 // ponytail: Hollister/PacSun/ASOS reject non-browser traffic (Akamai 403) —
 // direct scraping needs a headless browser, so they're not covered.
 import { fetchBestBuy } from "./bestbuy.js";
+import { fetchGap, fetchOldNavy } from "./gap.js";
 import { fetchHM } from "./hm.js";
 import { fetchIkea } from "./ikea.js";
 import { fetchNike } from "./nike.js";
+import {
+  fetchChubbies,
+  fetchGymshark,
+  fetchMarineLayer,
+  fetchParachute,
+  fetchTaylorStitch,
+} from "./shopify.js";
 import { fetchZara } from "./zara.js";
 
 /** All direct scrapers, in the same {name, fetch} shape sources.js uses. */
@@ -16,6 +24,13 @@ export const SCRAPERS = [
   { name: "hm.com", fetch: fetchHM },
   { name: "nike.com", fetch: fetchNike },
   { name: "ikea.com", fetch: fetchIkea },
+  { name: "gap.com", fetch: fetchGap },
+  { name: "oldnavy.com", fetch: fetchOldNavy },
+  { name: "taylorstitch.com", fetch: fetchTaylorStitch },
+  { name: "marinelayer.com", fetch: fetchMarineLayer },
+  { name: "chubbiesshorts.com", fetch: fetchChubbies },
+  { name: "gymshark.com", fetch: fetchGymshark },
+  { name: "parachutehome.com", fetch: fetchParachute },
   // official API, needs a free key from developer.bestbuy.com in .env
   ...(process.env.BESTBUY_API_KEY ? [{ name: "bestbuy.com", fetch: fetchBestBuy }] : []),
 ];

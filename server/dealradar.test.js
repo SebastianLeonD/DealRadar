@@ -5,9 +5,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { categorize, detectStore, extractPrice } from "./categorize.js";
 import * as db from "./db.js";
+import { mapGapBrand } from "./stores/gap.js";
 import { mapHM } from "./stores/hm.js";
 import { mapIkea } from "./stores/ikea.js";
 import { mapNike } from "./stores/nike.js";
+import { mapShopify } from "./stores/shopify.js";
 import { mapZara } from "./stores/zara.js";
 
 describe("categorize", () => {
@@ -146,6 +148,78 @@ describe("ikea mapper", () => {
     expect(deals[0].discount_pct).toBe(20);
     expect(deals[1].title).toBe("GÖRSNYGG, Storage case — $2.99 (last chance)");
     expect(deals[1].category).toBe("Home");
+  });
+});
+
+describe("gap mapper", () => {
+  it("maps the first discounted styleColor, skips full-price styles", () => {
+    const data = {
+      products: [
+        { styleId: "1", styleName: "Heavyweight Tee", styleColors: [
+          { ccId: "894635012", ccName: "Brown", effectivePrice: "19.97", regularPrice: "49.95",
+            percentageOff: "60", images: [{ path: "/webcontent/a.jpg" }] },
+        ] },
+        { styleId: "2", styleName: "Full Price Chino", styleColors: [
+          { ccId: "999", ccName: "Khaki", effectivePrice: "50.00", regularPrice: "50.00", percentageOff: "0" },
+        ] },
+      ],
+    };
+    const deals = mapGapBrand(data, {
+      store: "Gap", urlBase: "https://www.gap.com/browse/product.do?pid=", imgHost: "https://www.gap.com",
+    });
+    expect(deals).toHaveLength(1);
+    expect(deals[0].title).toBe("Heavyweight Tee — $19.97 (was $49.95, 60% off)");
+    expect(deals[0].url).toBe("https://www.gap.com/browse/product.do?pid=894635012");
+    expect(deals[0].image_url).toBe("https://www.gap.com/webcontent/a.jpg");
+    expect(deals[0].colors).toBe("brown");
+    expect(deals[0].discount_pct).toBe(60);
+    expect(deals[0].store).toBe("Gap");
+  });
+});
+
+describe("shopify mapper", () => {
+  const cfg = { domain: "www.example.com", store: "Ex", source: "example.com" };
+
+  it("picks the markdown variant and extracts sizes/colors", () => {
+    const data = { products: [{
+      title: "Signature Tee", handle: "sig-tee", product_type: "Mens - Tees",
+      images: [{ src: "https://cdn/x.jpg" }],
+      options: [{ name: "Size" }, { name: "Color" }],
+      variants: [
+        { option1: "S", option2: "Blue", price: "20.00", compare_at_price: "40.00", available: true },
+        { option1: "M", option2: "Blue", price: "20.00", compare_at_price: "40.00", available: false },
+        { option1: "L", option2: "Red", price: "20.00", compare_at_price: "40.00", available: true },
+      ],
+    }] };
+    const deals = mapShopify(data, cfg);
+    expect(deals).toHaveLength(1);
+    expect(deals[0].title).toBe("Signature Tee — $20 (was $40, 50% off)");
+    expect(deals[0].url).toBe("https://www.example.com/products/sig-tee");
+    expect(deals[0].sizes).toBe("S,L"); // only in-stock sizes
+    expect(deals[0].colors).toBe("blue,red");
+    expect(deals[0].discount_pct).toBe(50);
+  });
+
+  it("guards $0 free-gift variants and full-price products", () => {
+    const data = { products: [
+      { title: "Free Gift", handle: "gift", options: [{ name: "Size" }],
+        variants: [{ option1: "OS", price: "0.00", compare_at_price: "25.00", available: true }] },
+      { title: "Full Price", handle: "fp", options: [{ name: "Size" }],
+        variants: [{ option1: "M", price: "30.00", compare_at_price: null, available: true }] },
+    ] };
+    expect(mapShopify(data, cfg)).toHaveLength(0);
+  });
+
+  it("applies a men's product_type keep filter", () => {
+    const keep = (p) => (p.product_type ?? "").toLowerCase().startsWith("mens");
+    const data = { products: [
+      { title: "Mens Short", handle: "ms", product_type: "Mens - Bottoms", options: [{ name: "Size" }],
+        variants: [{ option1: "M", price: "20.00", compare_at_price: "40.00", available: true }] },
+      { title: "Womens Dress", handle: "wd", product_type: "Womens - Dresses", options: [{ name: "Size" }],
+        variants: [{ option1: "M", price: "20.00", compare_at_price: "40.00", available: true }] },
+    ] };
+    const deals = mapShopify(data, { ...cfg, keep });
+    expect(deals.map((d) => d.title)).toEqual(["Mens Short — $20 (was $40, 50% off)"]);
   });
 });
 

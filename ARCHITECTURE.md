@@ -13,6 +13,8 @@ sources.fetchAll() (direct scrapers, per-source health) → categorize.js tags e
 Sources are direct fetchers only — no RSS/feeds.
 - Zara + H&M + Nike: direct unofficial JSON endpoints (see each stores/ file header for endpoint notes; Nike needs the public `nike-api-caller-id` header). Men's sections only (user preference). Zara/H&M emit `colors`/`sizes`/`discount_pct`; `/api/filters` aggregates them for the sidebar.
 - IKEA: "Last chance" pages are server-rendered; fetcher parses embedded schema.org JSON-LD (ItemList lives under CollectionPage.mainEntity inside `@graph`).
+- Gap + Old Navy (`stores/gap.js`): shared `api.gap.com` commerce gateway (no auth), men's-sale cid per brand. Prices/percentages are strings (coerced); `/webcontent` image paths served from each brand's site host.
+- Shopify stores (`stores/shopify.js`, one generic `mapShopify`/`makeShopifyFetcher`): Taylor Stitch, Marine Layer, Chubbies, Gymshark, Parachute — each `/collections/{handle}/products.json`; a markdown = variant with `compare_at_price > price > 0`. Men's-only via `product_type`/`tags` filters (Marine Layer, Gymshark); Parachute is Home, others Clothing.
 - Best Buy: official API, activates when BESTBUY_API_KEY is set in .env (free key from developer.bestbuy.com).
 
 ## Per-category filters
