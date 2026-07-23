@@ -162,14 +162,14 @@ export function countDeals(filters = {}) {
 export function refreshDealData(deals) {
   const db = connect();
   const stmt = db.prepare(
-    `UPDATE deals SET title = ?, price = ?, image_url = ?, colors = ?, sizes = ?, discount_pct = ?
+    `UPDATE deals SET title = ?, price = ?, image_url = ?, colors = ?, sizes = ?, discount_pct = ?, category = ?
      WHERE id = ?`
   );
   db.exec("BEGIN");
   try {
     for (const d of deals) {
       stmt.run(d.title, d.price ?? null, d.image_url ?? null, d.colors ?? null,
-        d.sizes ?? null, d.discount_pct ?? null, dealId(d.url));
+        d.sizes ?? null, d.discount_pct ?? null, d.category ?? "Other", dealId(d.url));
     }
     db.exec("COMMIT");
   } catch (e) {
