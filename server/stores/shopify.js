@@ -123,3 +123,26 @@ export const fetchLuluGeorgia = makeShopifyFetcher({
   domain: "luluandgeorgia.com", handle: "sale",
   store: "Lulu and Georgia", source: "luluandgeorgia.com", category: "For Your Room",
 });
+
+// Tech — quality-but-affordable accessory brands (audio, cases, smart home,
+// keyboards, charging). Best Buy (official API) also feeds Tech when keyed.
+export const fetchJLab = makeShopifyFetcher({
+  domain: "jlab.com", handle: "sale",
+  store: "JLab", source: "jlab.com", category: "Tech",
+});
+export const fetchWyze = makeShopifyFetcher({
+  domain: "wyze.com", handle: "sale",
+  store: "Wyze", source: "wyze.com", category: "Tech",
+});
+export const fetchMous = makeShopifyFetcher({
+  domain: "mous.co", handle: "sale",
+  store: "Mous", source: "mous.co", category: "Tech",
+});
+export const fetchEpomaker = makeShopifyFetcher({
+  domain: "epomaker.com", handle: "deals",
+  store: "Epomaker", source: "epomaker.com", category: "Tech",
+});
+export const fetchSharge = makeShopifyFetcher({
+  domain: "sharge.com", handle: "clearance",
+  store: "Sharge", source: "sharge.com", category: "Tech",
+});

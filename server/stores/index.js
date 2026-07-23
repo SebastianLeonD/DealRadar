@@ -10,8 +10,9 @@ import { fetchHM } from "./hm.js";
 import { fetchIkea } from "./ikea.js";
 import { fetchNike } from "./nike.js";
 import {
-  fetchBrooklinen, fetchColorCord, fetchCoyuchi, fetchGymshark, fetchJonathanY,
-  fetchLuluGeorgia, fetchMitzi, fetchOurPlace, fetchParachute, fetchVitruvi,
+  fetchBrooklinen, fetchColorCord, fetchCoyuchi, fetchEpomaker, fetchGymshark,
+  fetchJLab, fetchJonathanY, fetchLuluGeorgia, fetchMitzi, fetchMous,
+  fetchOurPlace, fetchParachute, fetchSharge, fetchVitruvi, fetchWyze,
 } from "./shopify.js";
 import { fetchTarget } from "./target.js";
 import { fetchZara } from "./zara.js";
@@ -35,6 +36,12 @@ export const SCRAPERS = [
   { name: "vitruvi.com", fetch: fetchVitruvi },
   { name: "jonathany.com", fetch: fetchJonathanY },
   { name: "luluandgeorgia.com", fetch: fetchLuluGeorgia },
+  // Tech — quality-affordable accessory brands
+  { name: "jlab.com", fetch: fetchJLab },
+  { name: "wyze.com", fetch: fetchWyze },
+  { name: "mous.co", fetch: fetchMous },
+  { name: "epomaker.com", fetch: fetchEpomaker },
+  { name: "sharge.com", fetch: fetchSharge },
   // Target's RedSky is Akamai-protected: it captchas repeated/flagged traffic
   // (see ISSUES.md). Off by default; set ENABLE_TARGET=1 to try it from a clean,
   // low-volume IP. Fails safe (throws on captcha) rather than polluting data.
