@@ -5,6 +5,17 @@ import { getJSON, usd } from "./util.js";
 
 const num = (x) => Number(x);
 
+// images[0] is "OVI1", a ~57px swatch — pick a real product shot instead.
+// VLI ~520px (light), P01 ~258px, Z ~1500px (heavy) — first that exists wins.
+const IMG_TYPES = ["VLI", "P01", "Z"];
+const pickImg = (images = []) => {
+  for (const t of IMG_TYPES) {
+    const m = images.find((i) => i.type === t);
+    if (m?.path) return m.path;
+  }
+  return images[0]?.path ?? null;
+};
+
 /** Pure mapper: gap search JSON -> deals. Takes the first discounted styleColor
     per style (effectivePrice < regularPrice). */
 export function mapGapBrand(data, { store, urlBase, imgHost }) {
@@ -17,8 +28,8 @@ export function mapGapBrand(data, { store, urlBase, imgHost }) {
     const price = num(sc.effectivePrice);
     const was = num(sc.regularPrice);
     const pct = num(sc.percentageOff) || Math.round((1 - price / was) * 100);
-    const path = sc.images?.[0]?.path;
-    const img = path ? `${imgHost}${path.startsWith("/") ? "" : "/"}${path}` : null;
+    const path = pickImg(sc.images);
+    const img = path ? `${imgHost}/${path.replace(/^\//, "")}` : null;
     deals.push({
       title: `${p.styleName} — ${usd(price)} (was ${usd(was)}, ${pct}% off)`,
       url: `${urlBase}${sc.ccId}`,
