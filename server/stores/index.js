@@ -10,6 +10,7 @@ import { fetchHM } from "./hm.js";
 import { fetchIkea } from "./ikea.js";
 import { fetchNike } from "./nike.js";
 import { fetchGymshark, fetchParachute } from "./shopify.js";
+import { fetchTarget } from "./target.js";
 import { fetchZara } from "./zara.js";
 
 /** All direct scrapers, in the same {name, fetch} shape sources.js uses. */
@@ -22,6 +23,7 @@ export const SCRAPERS = [
   { name: "oldnavy.com", fetch: fetchOldNavy },
   { name: "gymshark.com", fetch: fetchGymshark },
   { name: "parachutehome.com", fetch: fetchParachute },
+  { name: "target.com", fetch: fetchTarget },
   // official API, needs a free key from developer.bestbuy.com in .env
   ...(process.env.BESTBUY_API_KEY ? [{ name: "bestbuy.com", fetch: fetchBestBuy }] : []),
 ];

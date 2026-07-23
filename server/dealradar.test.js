@@ -10,6 +10,7 @@ import { mapHM } from "./stores/hm.js";
 import { mapIkea } from "./stores/ikea.js";
 import { mapNike } from "./stores/nike.js";
 import { mapShopify } from "./stores/shopify.js";
+import { mapTarget } from "./stores/target.js";
 import { mapZara } from "./stores/zara.js";
 
 describe("categorize", () => {
@@ -220,6 +221,32 @@ describe("shopify mapper", () => {
     ] };
     const deals = mapShopify(data, { ...cfg, keep });
     expect(deals.map((d) => d.title)).toEqual(["Mens Short — $20 (was $40, 50% off)"]);
+  });
+});
+
+describe("target mapper", () => {
+  it("maps RedSky markdowns as Home deals, skips full-price", () => {
+    const mk = (title, cur, reg, pct) => ({
+      price: { current_retail: cur, reg_retail: reg, save_percent: pct },
+      item: {
+        product_description: { title },
+        enrichment: {
+          buy_url: `https://www.target.com/p/x/-/A-${title.length}`,
+          image_info: { primary_image: { url: "https://target.scene7.com/is/image/Target/GUEST_1" } },
+        },
+      },
+    });
+    const data = { data: { search: { products: [
+      mk("Bedding Bundle", 79.99, 133.99, 40),
+      mk("Full Price Rug", 50, 50, 0),
+    ] } } };
+    const deals = mapTarget(data);
+    expect(deals).toHaveLength(1);
+    expect(deals[0].title).toBe("Bedding Bundle — $79.99 (was $133.99, 40% off)");
+    expect(deals[0].category).toBe("Home");
+    expect(deals[0].store).toBe("Target");
+    expect(deals[0].image_url).toBe("https://target.scene7.com/is/image/Target/GUEST_1?wid=600");
+    expect(deals[0].discount_pct).toBe(40);
   });
 });
 

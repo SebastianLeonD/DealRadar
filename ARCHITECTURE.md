@@ -15,6 +15,7 @@ Sources are direct fetchers only — no RSS/feeds.
 - IKEA: "Last chance" pages are server-rendered; fetcher parses embedded schema.org JSON-LD (ItemList lives under CollectionPage.mainEntity inside `@graph`).
 - Gap + Old Navy (`stores/gap.js`): shared `api.gap.com` commerce gateway (no auth), men's-sale cid per brand. Prices/percentages are strings (coerced); `/webcontent` image paths served from each brand's site host.
 - Shopify stores (`stores/shopify.js`, one generic `mapShopify`/`makeShopifyFetcher`): Gymshark, Parachute — each `/collections/{handle}/products.json`; a markdown = variant with `compare_at_price > price > 0`. Gymshark is men's-only via a `tags` filter (`Mens` and not `Womens`); Parachute is Home, others Clothing.
+- Target (`stores/target.js`): RedSky public API (`redsky.target.com/.../plp_search_v2`), category "Home", home-clearance keyword. Akamai TLS-fingerprints Node's fetch (403) and captchas bursty traffic, so it shells out to the system `curl` and makes a single request per refresh; captcha responses throw so per-source health flags them. `key`/`pricing_store_id` are Target's public web values and may rotate.
 - Best Buy: official API, activates when BESTBUY_API_KEY is set in .env (free key from developer.bestbuy.com).
 
 ## Per-category filters
