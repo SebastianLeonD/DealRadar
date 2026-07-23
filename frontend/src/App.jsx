@@ -11,7 +11,7 @@ import Ticker from "./components/Ticker.jsx";
 import TopBar from "./components/TopBar.jsx";
 
 const DEFAULT_FILTERS = {
-  category: "All", items: [], query: "", store: "All",
+  category: "All", items: [], query: "", stores: [],
   minPrice: "", maxPrice: "", age: "48", order: "new",
   colors: [], sizes: [], minDiscount: "",
 };
@@ -119,7 +119,7 @@ export default function App() {
         onCategory={(category) => {
           setSaleMode(false);
           // section change resets section-specific filters
-          patchFilters({ category, store: "All", items: [], sizes: [], colors: [] });
+          patchFilters({ category, stores: [], items: [], sizes: [], colors: [] });
         }}
         onToggleSale={() => setSaleMode((s) => !s)}
       />

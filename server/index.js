@@ -88,7 +88,7 @@ app.get("/api/deals", (req, res) => {
     category: req.query.category,
     q: req.query.q,
     items: list(req.query.items),
-    store: req.query.store,
+    stores: list(req.query.stores),
     maxPrice: num(req.query.max_price),
     minPrice: num(req.query.min_price),
     maxAgeHours: num(req.query.max_age_hours),

@@ -11,7 +11,7 @@ export function fetchDeals(filters) {
   if (filters.category !== "All") params.set("category", filters.category);
   if (filters.items?.length) params.set("items", filters.items.join(","));
   if (filters.query) params.set("q", filters.query);
-  if (filters.store !== "All") params.set("store", filters.store);
+  if (filters.stores?.length) params.set("stores", filters.stores.join(","));
   if (filters.maxPrice) params.set("max_price", filters.maxPrice);
   if (filters.minPrice) params.set("min_price", filters.minPrice);
   if (filters.colors?.length) params.set("colors", filters.colors.join(","));

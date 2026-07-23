@@ -72,26 +72,12 @@ export function makeShopifyFetcher(cfg) {
   };
 }
 
-// Marine Layer's outlet is mixed; product_type is prefixed "Mens"/"Womens".
-const mensProductType = (p) => (p.product_type ?? "").toLowerCase().startsWith("mens");
 // Gymshark's outlet is mixed; a "Mens" tag (and no "Womens") is the reliable signal.
 const gymsharkMens = (p) => {
   const tags = (p.tags ?? []).map((t) => t.toLowerCase());
   return tags.includes("mens") && !tags.includes("womens");
 };
 
-export const fetchTaylorStitch = makeShopifyFetcher({
-  domain: "www.taylorstitch.com", handle: "mens-last-call",
-  store: "Taylor Stitch", source: "taylorstitch.com",
-});
-export const fetchMarineLayer = makeShopifyFetcher({
-  domain: "www.marinelayer.com", handle: "last-call",
-  store: "Marine Layer", source: "marinelayer.com", keep: mensProductType,
-});
-export const fetchChubbies = makeShopifyFetcher({
-  domain: "chubbiesshorts.com", handle: "clearance",
-  store: "Chubbies", source: "chubbiesshorts.com",
-});
 export const fetchGymshark = makeShopifyFetcher({
   domain: "gymshark.com", handle: "outlet",
   store: "Gymshark", source: "gymshark.com", keep: gymsharkMens,

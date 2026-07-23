@@ -92,7 +92,7 @@ export function unscoredDeals(limit = 30) {
 }
 
 function buildClauses({
-  category, q, items, store, maxPrice, minPrice, maxAgeHours, colors, sizes, minDiscount,
+  category, q, items, store, stores, maxPrice, minPrice, maxAgeHours, colors, sizes, minDiscount,
 }) {
   const clauses = [];
   const params = [];
@@ -122,7 +122,12 @@ function buildClauses({
       params.push(`*[^a-z0-9]${w}[^a-z0-9]*`, `*[^a-z0-9]${w}s[^a-z0-9]*`);
     }
   }
-  if (store && store !== "All") { clauses.push("store = ?"); params.push(store); }
+  // multiselect stores (OR'd); `store` kept for single-select callers
+  const storeList = (stores?.length ? stores : store ? [store] : []).filter((s) => s && s !== "All");
+  if (storeList.length) {
+    clauses.push("(" + storeList.map(() => "store = ?").join(" OR ") + ")");
+    params.push(...storeList);
+  }
   if (maxPrice != null) { clauses.push("price IS NOT NULL AND price <= ?"); params.push(maxPrice); }
   if (minPrice != null) { clauses.push("price IS NOT NULL AND price >= ?"); params.push(minPrice); }
   return { where: clauses.length ? " WHERE " + clauses.join(" AND ") : "", params };

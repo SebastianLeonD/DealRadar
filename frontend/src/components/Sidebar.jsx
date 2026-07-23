@@ -52,15 +52,14 @@ export default function Sidebar({ filters, category = "All", stores, facets, sal
         </div>
       )}
 
-      <div className="sideblock">
-        <div className="sidehead">STORE</div>
-        <select value={filters.store} onChange={(e) => set({ store: e.target.value })}>
-          <option value="All">All stores</option>
-          {stores.map((s) => (
-            <option key={s.store} value={s.store}>{s.store} ({s.n})</option>
-          ))}
-        </select>
-      </div>
+      {stores.length > 0 && (
+        <div className="sideblock">
+          <div className="sidehead">STORE</div>
+          <Chips options={stores.map((s) => s.store)} selected={filters.stores}
+            onToggle={(next) => set({ stores: next })}
+            format={(name) => `${name} (${stores.find((s) => s.store === name)?.n ?? 0})`} />
+        </div>
+      )}
 
       <div className="sideblock">
         <div className="sidehead">DISCOUNT</div>
@@ -113,7 +112,7 @@ export default function Sidebar({ filters, category = "All", stores, facets, sal
       </div>
 
       <button className="clearbtn" onClick={() => set({
-        items: [], store: "All", colors: [], sizes: [],
+        items: [], stores: [], colors: [], sizes: [],
         minDiscount: "", minPrice: "", maxPrice: "", age: "48",
       })}>
         CLEAR FILTERS

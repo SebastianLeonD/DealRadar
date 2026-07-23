@@ -249,6 +249,9 @@ describe("db", () => {
     ]);
     expect(db.listDeals({ items: ["jeans"], maxPrice: 30 }).map((d) => d.store)).toEqual(["ASOS"]);
     expect(db.listDeals({ store: "Hollister" })).toHaveLength(1);
+    expect(new Set(db.listDeals({ stores: ["Amazon", "ASOS"] }).map((d) => d.store))).toEqual(
+      new Set(["Amazon", "ASOS"])
+    );
     expect(db.countDeals({ items: ["jeans"] })).toBe(2);
     expect(db.listDeals({ maxPrice: 1000 })).toHaveLength(2); // no-price deals excluded
     expect(new Set(db.storeCounts().map((s) => s.store))).toEqual(new Set(["Amazon", "ASOS", "Hollister"]));
