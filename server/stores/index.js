@@ -23,7 +23,10 @@ export const SCRAPERS = [
   { name: "oldnavy.com", fetch: fetchOldNavy },
   { name: "gymshark.com", fetch: fetchGymshark },
   { name: "parachutehome.com", fetch: fetchParachute },
-  { name: "target.com", fetch: fetchTarget },
+  // Target's RedSky is Akamai-protected: it captchas repeated/flagged traffic
+  // (see ISSUES.md). Off by default; set ENABLE_TARGET=1 to try it from a clean,
+  // low-volume IP. Fails safe (throws on captcha) rather than polluting data.
+  ...(process.env.ENABLE_TARGET ? [{ name: "target.com", fetch: fetchTarget }] : []),
   // official API, needs a free key from developer.bestbuy.com in .env
   ...(process.env.BESTBUY_API_KEY ? [{ name: "bestbuy.com", fetch: fetchBestBuy }] : []),
 ];
