@@ -30,6 +30,9 @@ export async function runRefresh() {
   for (const d of deals) {
     // direct store fetchers pre-set these; fall back to title-derived values
     d.category = d.category ?? categorize.categorize(d.title);
+    // consolidate room upgrades (IKEA desks/shelves/lamps, decor, etc.) into the
+    // "For Your Room" tab alongside the dedicated room stores
+    if (d.category === "Home" && categorize.isRoomItem(d.title)) d.category = "For Your Room";
     d.store = d.store ?? categorize.detectStore(d.title, d.url);
     d.price = d.price ?? categorize.extractPrice(d.title);
     d.discount_pct = d.discount_pct ?? categorize.extractDiscount(d.title);

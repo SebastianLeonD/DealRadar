@@ -98,6 +98,19 @@ export function categorize(title) {
   return best;
 }
 
+// "For Your Room" — small room upgrades. Home-category deals whose title hits
+// one of these get rerouted to the "For Your Room" tab (see runRefresh), so
+// IKEA desks/shelves/lamps land alongside the dedicated room stores. Bedding/
+// bath/kitchen words are deliberately absent so those stay under Home.
+const ROOM_WORDS = [
+  "desk", "shelf", "shelves", "shelving", "bookcase", "bookshelf", "rug",
+  "lamp", "lighting", "sconce", "pendant", "chandelier", "lantern",
+  "humidifier", "diffuser", "mirror", "curtain", "blinds", "tapestry",
+  "poster", "planter", "nightstand", "stool", "ottoman", "vase", "candle",
+  "clock", "hamper",
+];
+export const isRoomItem = (title) => ROOM_WORDS.some((w) => wordMatch(title, w));
+
 /** Pull the sale price out of a title like "Levi's 501 Jeans $39.99 (was $70)".
     The first dollar amount in a deal title is almost always the sale price. */
 export function extractPrice(title) {

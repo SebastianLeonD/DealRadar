@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { categorize, detectStore, extractPrice } from "./categorize.js";
+import { categorize, detectStore, extractPrice, isRoomItem } from "./categorize.js";
 import * as db from "./db.js";
 import { mapGapBrand } from "./stores/gap.js";
 import { mapHM } from "./stores/hm.js";
@@ -20,6 +20,14 @@ describe("categorize", () => {
   });
   it("falls back to Other", () => {
     expect(categorize("zzz completely unrelated thing")).toBe("Other");
+  });
+  it("flags room items (desks/shelves/lamps/rugs) for the For-Your-Room tab", () => {
+    expect(isRoomItem("MICKE Desk, white — $69 (was $99, 30% off)")).toBe(true);
+    expect(isRoomItem("BILLY Bookcase / shelves — $40 (was $60)")).toBe(true);
+    expect(isRoomItem("Woven Jute Rug 5x7 — $45 (was $90)")).toBe(true);
+    expect(isRoomItem("Ceramic Table Lamp — $30 (was $55)")).toBe(true);
+    expect(isRoomItem("Organic Percale Sheet Set — $60 (was $120)")).toBe(false); // bedding stays Home
+    expect(isRoomItem("Always Pan cookware — $95 (was $150)")).toBe(false);
   });
   it("matches whole words only — 'Steel' is not 'tee'", () => {
     expect(categorize("20-Piece Oneida Stainless Steel Flatware Set $35")).not.toBe("Clothing");
