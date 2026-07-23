@@ -100,3 +100,26 @@ export const fetchOurPlace = makeShopifyFetcher({
   domain: "fromourplace.com", handle: "sale",
   store: "Our Place", source: "fromourplace.com", category: "Home",
 });
+
+// "For Your Room" — small room upgrades (lights, rugs, decor, air/scent). Own
+// tab via the distinct category; mixed prices, user filters with the <$100 cap.
+export const fetchMitzi = makeShopifyFetcher({
+  domain: "mitzi.com", handle: "sale",
+  store: "Mitzi", source: "mitzi.com", category: "For Your Room",
+});
+export const fetchColorCord = makeShopifyFetcher({
+  domain: "colorcord.com", handle: "sale",
+  store: "Color Cord", source: "colorcord.com", category: "For Your Room",
+});
+export const fetchVitruvi = makeShopifyFetcher({
+  domain: "vitruvi.com", handle: "sale",
+  store: "Vitruvi", source: "vitruvi.com", category: "For Your Room",
+});
+export const fetchJonathanY = makeShopifyFetcher({
+  domain: "jonathany.com", handle: "deals",
+  store: "Jonathan Y", source: "jonathany.com", category: "For Your Room",
+});
+export const fetchLuluGeorgia = makeShopifyFetcher({
+  domain: "luluandgeorgia.com", handle: "sale",
+  store: "Lulu and Georgia", source: "luluandgeorgia.com", category: "For Your Room",
+});
