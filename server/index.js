@@ -79,6 +79,14 @@ export async function runRefresh() {
 }
 
 const app = express();
+app.use(express.json());
+
+// Saved-items watchlist: given the URLs the browser has saved, return the ones
+// still on sale (with fresh price/title). Anything missing = no longer on sale.
+app.post("/api/deals/live", (req, res) => {
+  const urls = Array.isArray(req.body?.urls) ? req.body.urls.filter(Boolean) : [];
+  res.json({ live: db.dealsByUrls(urls) });
+});
 
 app.get("/api/deals", (req, res) => {
   const num = (v) => (v === undefined || v === "" ? null : Number(v));

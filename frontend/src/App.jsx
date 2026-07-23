@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  fetchCategories, fetchDeals, fetchFilters, fetchStatus, fetchStores, postNotify, postRefresh,
+  fetchCategories, fetchDeals, fetchFilters, fetchLive, fetchStatus, fetchStores, postNotify, postRefresh,
 } from "./api.js";
+import { useSaved } from "./saved.js";
 import DealGrid from "./components/DealGrid.jsx";
 import DealModal from "./components/DealModal.jsx";
 import Sidebar from "./components/Sidebar.jsx";
@@ -19,6 +20,10 @@ const DEFAULT_FILTERS = {
 export default function App() {
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [saleMode, setSaleMode] = useState(false);
+  const { saved, toggle: toggleSave } = useSaved();
+  const savedSet = new Set(saved.map((d) => d.url));
+  const [savedView, setSavedView] = useState(false);
+  const [liveUrls, setLiveUrls] = useState(null); // null until we've checked
   const [limit, setLimit] = useState(100);
   const [total, setTotal] = useState(0);
   const [deals, setDeals] = useState([]);
@@ -66,6 +71,17 @@ export default function App() {
     return () => clearInterval(interval);
   }, [loadAll]);
 
+  // in the saved view, ask the server which saved deals are still on sale
+  useEffect(() => {
+    if (!savedView) return;
+    let cancelled = false;
+    setLiveUrls(null);
+    fetchLive(saved.map((d) => d.url))
+      .then((rows) => !cancelled && setLiveUrls(new Set(rows.map((r) => r.url))))
+      .catch(() => !cancelled && setLiveUrls(new Set(saved.map((d) => d.url)))); // on error, assume all live
+    return () => { cancelled = true; };
+  }, [savedView, saved]);
+
   const patchFilters = (patch) => {
     if ("saleMode" in patch) {
       setSaleMode(patch.saleMode);
@@ -101,6 +117,9 @@ export default function App() {
   };
 
   const catLabel = filters.category === "All" ? "All Deals" : filters.category;
+  const shown = savedView ? saved : deals;
+  const staleSet = savedView && liveUrls ? new Set(saved.filter((d) => !liveUrls.has(d.url)).map((d) => d.url)) : null;
+  const openDeal = openIndex != null ? shown[openIndex] : null;
 
   return (
     <>
@@ -116,27 +135,44 @@ export default function App() {
         categories={categories}
         activeCategory={filters.category}
         saleMode={saleMode}
+        savedView={savedView}
+        savedCount={saved.length}
         onCategory={(category) => {
           setSaleMode(false);
+          setSavedView(false);
+          setOpenIndex(null);
           // section change resets section-specific filters
           patchFilters({ category, stores: [], items: [], sizes: [], colors: [] });
         }}
-        onToggleSale={() => setSaleMode((s) => !s)}
+        onToggleSale={() => { setSavedView(false); setOpenIndex(null); setSaleMode((s) => !s); }}
+        onSaved={() => { setSaleMode(false); setOpenIndex(null); setSavedView((v) => !v); }}
       />
       <Ticker deals={deals} />
       <div className="page">
         <div className="titlerow">
-          <h2>{saleMode ? "The Hot List" : `Today's Board — ${catLabel}`}</h2>
+          <h2>{savedView ? "Saved Deals" : saleMode ? "The Hot List" : `Today's Board — ${catLabel}`}</h2>
           <span className="stylecount">
-            {total > deals.length ? `${deals.length} OF ${total}` : deals.length} DEAL{total === 1 ? "" : "S"} ON THE WIRE
+            {savedView
+              ? `${saved.length} SAVED`
+              : `${total > deals.length ? `${deals.length} OF ${total}` : deals.length} DEAL${total === 1 ? "" : "S"} ON THE WIRE`}
           </span>
         </div>
         <SourceLog status={status} />
         <div className="pagegrid">
-          <Sidebar filters={filters} category={filters.category} stores={stores} facets={facets} saleMode={saleMode} onChange={patchFilters} />
-          <main>
-            <DealGrid deals={deals} loading={loading} onOpen={setOpenIndex} />
-            {total > deals.length && (
+          {savedView ? null : (
+            <Sidebar filters={filters} category={filters.category} stores={stores} facets={facets} saleMode={saleMode} onChange={patchFilters} />
+          )}
+          <main className={savedView ? "full" : ""}>
+            <DealGrid
+              deals={shown}
+              loading={savedView ? false : loading}
+              onOpen={setOpenIndex}
+              savedSet={savedSet}
+              onToggleSave={toggleSave}
+              staleSet={staleSet}
+              emptyMsg={savedView ? "NO SAVED DEALS YET — TAP ☆ ON ANY DEAL TO SAVE IT." : undefined}
+            />
+            {!savedView && total > deals.length && (
               <button className="showmore" onClick={() => setLimit((l) => l + 100)}>
                 ▾ SHOW MORE ({total - deals.length} REMAINING)
               </button>
@@ -144,7 +180,13 @@ export default function App() {
           </main>
         </div>
       </div>
-      <DealModal deal={openIndex != null ? deals[openIndex] : null} onClose={() => setOpenIndex(null)} />
+      <DealModal
+        deal={openDeal}
+        onClose={() => setOpenIndex(null)}
+        isSaved={openDeal ? savedSet.has(openDeal.url) : false}
+        onToggleSave={toggleSave}
+        stale={openDeal ? staleSet?.has(openDeal.url) : false}
+      />
       {toast ? <div className="toast show">{toast}</div> : null}
     </>
   );

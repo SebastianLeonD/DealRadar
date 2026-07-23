@@ -14,10 +14,10 @@ export function Thumb({ deal, big = false, eager = false }) {
   );
 }
 
-export default function DealCard({ deal, index, onOpen }) {
+export default function DealCard({ deal, index, onOpen, isSaved, onToggleSave, stale }) {
   return (
     <article
-      className="card"
+      className={`card ${stale ? "stale" : ""}`}
       onClick={onOpen}
       style={{ animationDelay: `${Math.min(index * 45, 500)}ms` }}
     >
@@ -27,6 +27,16 @@ export default function DealCard({ deal, index, onOpen }) {
           <div className={`scorebadge ${scoreClass(deal.ai_score)}`}>★ {deal.ai_score}</div>
         ) : null}
         {deal.ai_score >= 9 ? <div className="hotbadge">HOT</div> : null}
+        {onToggleSave ? (
+          <button
+            className={`savebtn ${isSaved ? "on" : ""}`}
+            title={isSaved ? "Remove from saved" : "Save"}
+            onClick={(e) => { e.stopPropagation(); onToggleSave(deal); }}
+          >
+            {isSaved ? "★" : "☆"}
+          </button>
+        ) : null}
+        {stale ? <div className="stalebanner">NO LONGER ON SALE</div> : null}
       </div>
       <div className="cardinfo">
         <div className="cardtitle">{deal.title}</div>

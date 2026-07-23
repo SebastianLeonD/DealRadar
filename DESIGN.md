@@ -18,4 +18,6 @@ White-paper newspaper look: sharp black rules, one red accent, mono for data.
 - 1.5px solid ink borders on interactive blocks; hover = translate(-1px,-1px) + shadow-sm
 - "Wire" strips (mono, 10-11px, letter-spaced, uppercase) for status rows — TopBar wire, SourceLog
 - Cards: 3/4 image box with ink bottom border, title then price row
+- Save toggle (`.savebtn` ☆/★): boxed button top-right of the image; filled red when saved
+- Stale (saved but off-sale): greyscale image, red corner-to-corner diagonal line, rotated red "NO LONGER ON SALE" ribbon — still clickable
 - Fonts self-hosted via @fontsource (no external requests)

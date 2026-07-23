@@ -4,7 +4,7 @@ npm workspaces monorepo, all-JavaScript (Node >= 22.5).
 
 ## Folders
 - `server/` — Node API. `index.js` (entry, HTTP server, refresh loop + in-memory refresh log; skips startup refresh when data <5 min old), `sources.js` (`ALL_SOURCES` = the direct scrapers; 30-min cooldown for 429'd sources — no RSS/feeds), `stores/` (one file per direct fetcher: `zara.js`, `hm.js`, `nike.js`, `ikea.js`, `bestbuy.js` (only active with BESTBUY_API_KEY), + `util.js` helpers, `index.js` exports `SCRAPERS`), `categorize.js` (category/store/price from title+url, optional AI scoring), `db.js` (SQLite storage), `notify.js` (Discord), `dealradar.test.js` (tests).
-- `frontend/` — Vite + React SPA. `src/main.jsx` (entry) → `App.jsx` → components (`DealGrid`, `DealCard`, `DealModal`, `Sidebar` (left filter rail: item/store/discount/price/size/color/freshness), `TopBar`, `SubNav`, `Ticker`, `SourceLog`). `api.js` talks to the server.
+- `frontend/` — Vite + React SPA. `src/main.jsx` (entry) → `App.jsx` → components (`DealGrid`, `DealCard`, `DealModal`, `Sidebar` (left filter rail: item/store/discount/price/size/color/freshness), `TopBar`, `SubNav`, `Ticker`, `SourceLog`). `api.js` talks to the server. `saved.js` (`useSaved` hook) is a browser-local watchlist stored in `localStorage` (`dealradar:saved`, full deal snapshots).
 
 ## Data flow
 sources.fetchAll() (direct scrapers, per-source health) → categorize.js tags each deal → db.js stores (dedup by URL hash) → index.js serves API (`/api/deals`, `/api/status` incl. `refresh_log`) → frontend/src/api.js → React components. Scrapers embed price in the title ("X — $12 (was $40, 70% off)"); the normal extractPrice/detectStore pipeline picks it up.
@@ -20,6 +20,9 @@ Sources are direct fetchers only — no RSS/feeds.
 ## Per-category filters
 Sidebar personalizes by section: Clothing (or All) shows item/size/color; other sections just store/discount/price/freshness. `/api/stores?category=X` scopes the store dropdown; switching sections resets store/item/size/color. Item/size/color/store are multiselect (chips toggle in/out; sent to `/api/deals` as comma-joined `items`/`sizes`/`colors`/`stores`, OR'd within each group). The sidebar itself scrolls (`max-height: calc(100vh - 120px); overflow-y: auto`) so the wheel scrolls the rail, not the page, when hovering it.
 - Per-source health: every refresh records ok/count/error/ms per source; UI "SOURCE WIRE" panel + `/api/status.refresh_log` (last 20, in-memory).
+
+## Saved items (watchlist)
+Client-side only — no accounts. `saved.js` keeps a snapshot of each saved deal in `localStorage`, so saved deals still render after they leave the live board. The "★ Saved" tab (SubNav) shows them; on open it POSTs the saved URLs to `/api/deals/live` (→ `db.dealsByUrls`), which returns the subset still on sale. Anything missing is marked stale (greyed + red diagonal + "NO LONGER ON SALE" banner) but stays clickable — the modal's OPEN DEAL link still works. The ☆/★ toggle on any card or in the modal saves/unsaves (unsaving in the Saved view removes it).
 
 ## Entry points
 - `npm run dev` — API (`node --watch server/index.js`) + Vite dev server concurrently.

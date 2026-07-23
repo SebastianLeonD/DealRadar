@@ -23,6 +23,18 @@ export function fetchDeals(filters) {
   return getJSON("/api/deals?" + params);
 }
 
+// Which of these saved URLs are still on sale (returns live rows w/ fresh price).
+export async function fetchLive(urls) {
+  if (!urls.length) return [];
+  const resp = await fetch("/api/deals/live", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ urls }),
+  });
+  if (!resp.ok) throw new Error(`live -> HTTP ${resp.status}`);
+  return (await resp.json()).live;
+}
+
 export const fetchCategories = () => getJSON("/api/categories");
 export const fetchStores = (category) =>
   getJSON("/api/stores" + (category && category !== "All" ? `?category=${encodeURIComponent(category)}` : ""));

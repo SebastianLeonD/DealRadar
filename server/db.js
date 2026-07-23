@@ -143,6 +143,14 @@ export function listDeals({ order = "new", limit = 100, ...filters } = {}) {
   return connect().prepare(sql).all(...params, limit);
 }
 
+/** Rows still present for the given URLs — i.e. still on sale (used by the
+    saved-items watchlist to tell which saved deals have dropped off). */
+export function dealsByUrls(urls = []) {
+  if (!urls.length) return [];
+  const qs = urls.map(() => "?").join(",");
+  return connect().prepare(`SELECT * FROM deals WHERE url IN (${qs})`).all(...urls);
+}
+
 /** Total rows matching the same filters listDeals takes (ignores limit). */
 export function countDeals(filters = {}) {
   const { where, params } = buildClauses(filters);

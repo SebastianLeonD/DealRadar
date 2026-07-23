@@ -308,3 +308,48 @@ a.gobtn:hover { background: var(--red); border-color: var(--red); box-shadow: va
   color: var(--ink); cursor: pointer; font: 700 11.5px var(--mono); letter-spacing: 1.4px; padding: 12px 26px;
 }
 .showmore:hover { background: var(--ink); color: var(--paper); box-shadow: var(--shadow-sm); }
+
+/* --- Saved-items watchlist --- */
+.section.saved sup { color: var(--red); }
+.pagegrid main.full { grid-column: 1 / -1; }
+
+/* save/bookmark toggle on cards */
+.savebtn {
+  position: absolute; top: 6px; right: 6px; z-index: 4;
+  width: 30px; height: 30px; padding: 0; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--ink); background: #fff; color: var(--ink);
+  font-size: 16px; line-height: 1;
+  transition: transform .12s ease, background .12s ease, color .12s ease;
+}
+.savebtn:hover { transform: translate(-1px, -1px); box-shadow: var(--shadow-sm); }
+.savebtn.on { background: var(--red); color: #fff; border-color: var(--red); }
+
+/* stale = saved but no longer on sale: grey it, cross it, keep it clickable */
+.card { position: relative; }
+.card.stale .imgbox img { filter: grayscale(1); opacity: .7; }
+.card.stale::after {
+  content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  background: linear-gradient(to top right,
+    transparent calc(50% - 1.25px), var(--red) calc(50% - 1.25px),
+    var(--red) calc(50% + 1.25px), transparent calc(50% + 1.25px));
+}
+.stalebanner {
+  position: absolute; top: 46%; left: -6px; right: -6px; z-index: 4;
+  transform: rotate(-7deg);
+  background: var(--red); color: #fff; text-align: center;
+  font: 700 11px var(--mono); letter-spacing: 1.5px; padding: 5px 0;
+  border-top: 1.5px solid var(--ink); border-bottom: 1.5px solid var(--ink);
+}
+
+/* modal: save button + stale note */
+.modalactions { display: flex; gap: 10px; align-items: stretch; margin-top: auto; }
+.modalactions a.gobtn { flex: 1; margin-top: 0; }
+.savebtn.wide {
+  position: static; width: auto; height: auto; padding: 0 20px; gap: 6px;
+  font: 700 12px var(--mono); letter-spacing: 1.5px; white-space: nowrap;
+}
+.stalenote {
+  font: 700 11px var(--mono); letter-spacing: 1px; color: var(--red);
+  border: 1.5px solid var(--red); padding: 8px 10px;
+}
