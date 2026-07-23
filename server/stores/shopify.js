@@ -86,3 +86,17 @@ export const fetchParachute = makeShopifyFetcher({
   domain: "www.parachutehome.com", handle: "all-sale",
   store: "Parachute", source: "parachutehome.com", category: "Home",
 });
+
+// Quality home brands, no gender filter — mixed price bands (user filters by price).
+export const fetchCoyuchi = makeShopifyFetcher({
+  domain: "coyuchi.com", handle: "sale",
+  store: "Coyuchi", source: "coyuchi.com", category: "Home",
+});
+export const fetchBrooklinen = makeShopifyFetcher({
+  domain: "brooklinen.com", handle: "last-call",
+  store: "Brooklinen", source: "brooklinen.com", category: "Home",
+});
+export const fetchOurPlace = makeShopifyFetcher({
+  domain: "fromourplace.com", handle: "sale",
+  store: "Our Place", source: "fromourplace.com", category: "Home",
+});

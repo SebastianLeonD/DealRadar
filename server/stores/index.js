@@ -9,7 +9,9 @@ import { fetchGap, fetchOldNavy } from "./gap.js";
 import { fetchHM } from "./hm.js";
 import { fetchIkea } from "./ikea.js";
 import { fetchNike } from "./nike.js";
-import { fetchGymshark, fetchParachute } from "./shopify.js";
+import {
+  fetchBrooklinen, fetchCoyuchi, fetchGymshark, fetchOurPlace, fetchParachute,
+} from "./shopify.js";
 import { fetchTarget } from "./target.js";
 import { fetchZara } from "./zara.js";
 
@@ -23,6 +25,9 @@ export const SCRAPERS = [
   { name: "oldnavy.com", fetch: fetchOldNavy },
   { name: "gymshark.com", fetch: fetchGymshark },
   { name: "parachutehome.com", fetch: fetchParachute },
+  { name: "coyuchi.com", fetch: fetchCoyuchi },
+  { name: "brooklinen.com", fetch: fetchBrooklinen },
+  { name: "fromourplace.com", fetch: fetchOurPlace },
   // Target's RedSky is Akamai-protected: it captchas repeated/flagged traffic
   // (see ISSUES.md). Off by default; set ENABLE_TARGET=1 to try it from a clean,
   // low-volume IP. Fails safe (throws on captcha) rather than polluting data.
